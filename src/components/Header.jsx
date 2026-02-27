@@ -1,4 +1,5 @@
 import { useState } from "react";
+import logo from "../assets/logo.jpeg";
 
 function Header() {
   const [active, setActive] = useState("home");
@@ -14,7 +15,9 @@ function Header() {
   return (
     <header className="header">
       <div className="header-inner">
-        <div className="header-brand">Ryda</div>
+        <div className="header-brand">
+          <img src={logo} alt="Ryda" className="header-logo" />
+        </div>
         <nav className="header-nav">
           <button
             type="button"

@@ -19,7 +19,7 @@ function Footer() {
           </a>
         </div>
         <div className="footer-meta">
-          <span>© {year} Ryda. All rights reserved.</span>
+          <span>© 2025 Ryda Private Hire Ltd.</span>
           <span>By contacting us you agree to our Terms & Services.</span>
         </div>
       </div>
