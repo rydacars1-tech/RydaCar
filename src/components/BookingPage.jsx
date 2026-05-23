@@ -66,6 +66,7 @@ function BookingPage({ taxiId }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [submittedBookingId, setSubmittedBookingId] = useState("");
   const [depositIntent, setDepositIntent] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function validate() {
     const nextErrors = {};
@@ -82,7 +83,12 @@ function BookingPage({ taxiId }) {
 
   function submitBooking(event) {
     event.preventDefault();
-    if (!validate()) return;
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    if (!validate()) {
+      setIsSubmitting(false);
+      return;
+    }
 
     const booking = {
       id: createId(),
@@ -98,6 +104,7 @@ function BookingPage({ taxiId }) {
       bookingDate,
       km,
       price,
+      status: "open",
       createdAt: new Date().toISOString()
     };
 
@@ -108,6 +115,7 @@ function BookingPage({ taxiId }) {
     setSubmittedBookingId(booking.id);
     setDepositIntent(false);
     setModalOpen(true);
+    setTimeout(() => setIsSubmitting(false), 650);
   }
 
   return (
@@ -124,9 +132,6 @@ function BookingPage({ taxiId }) {
       <main className="page-content">
         <div className="page-card">
           <h1 className="page-title">Book your taxi</h1>
-          <p className="page-subtitle">
-            Driver details are shown automatically from the taxi QR code. Fill your details and submit the booking.
-          </p>
 
           {errors.taxi && <div className="page-alert">{errors.taxi}</div>}
 
@@ -215,8 +220,19 @@ function BookingPage({ taxiId }) {
               </div>
             </div>
 
-            <button type="submit" className="form-primary" disabled={!taxiId || !taxi}>
-              Book now
+            <button
+              type="submit"
+              className="form-primary"
+              disabled={!taxiId || !taxi || isSubmitting}
+              aria-busy={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="btn-spinner" aria-hidden="true" /> Booking...
+                </>
+              ) : (
+                "Book now"
+              )}
             </button>
           </form>
         </div>

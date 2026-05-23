@@ -3,6 +3,7 @@ import * as QRCode from "qrcode";
 import logo from "../assets/logo.jpeg";
 
 const TAXIS_STORAGE_KEY = "ryda.taxis.v1";
+const BOOKINGS_STORAGE_KEY = "ryda.bookings.v1";
 
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -32,10 +33,26 @@ function buildTaxiBookingUrl(taxiId) {
   return `${base}/#/book?taxi=${encodeURIComponent(taxiId)}`;
 }
 
+function readBookings() {
+  try {
+    const raw = localStorage.getItem(BOOKINGS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getOpenBookingsCount() {
+  return readBookings().filter((b) => (b?.status || "open") === "open").length;
+}
+
 function QrGeneratorPage() {
   const [taxis, setTaxis] = useState(() => readTaxis());
   const [selectedTaxiId, setSelectedTaxiId] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [openBookingsCount, setOpenBookingsCount] = useState(() => getOpenBookingsCount());
   const selectedTaxi = useMemo(
     () => taxis.find((t) => t.id === selectedTaxiId) || null,
     [taxis, selectedTaxiId]
@@ -50,6 +67,11 @@ function QrGeneratorPage() {
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [bookingUrl, setBookingUrl] = useState("");
   const [copyState, setCopyState] = useState("idle");
+
+  useEffect(() => {
+    const id = setInterval(() => setOpenBookingsCount(getOpenBookingsCount()), 1500);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!selectedTaxi) return;
@@ -122,10 +144,13 @@ function QrGeneratorPage() {
             type="button"
             className="page-topbar-primary"
             onClick={() => {
-              setCreateModalOpen(true);
+              window.location.hash = "#/dashboard";
             }}
           >
-            Generate QR
+            Dashboard
+          </button>
+          <button type="button" className="page-topbar-primary page-topbar-primary-active">
+            QR codes
           </button>
           <button
             type="button"
@@ -135,9 +160,49 @@ function QrGeneratorPage() {
             }}
           >
             Bookings
+            {openBookingsCount > 0 && <span className="tab-badge">{openBookingsCount}</span>}
+          </button>
+          <button
+            type="button"
+            className="page-topbar-primary"
+            onClick={() => {
+              window.location.hash = "#/history";
+            }}
+          >
+            History
           </button>
         </div>
-        <div className="topbar-right" />
+        <div className="topbar-right">
+          <button
+            type="button"
+            className="page-topbar-primary desktop-only"
+            onClick={() => setCreateModalOpen(true)}
+          >
+            Generate QR code
+          </button>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+          </button>
+        </div>
       </header>
 
       <main className="page-content">
@@ -166,16 +231,21 @@ function QrGeneratorPage() {
             </div>
           ) : (
             <div className="taxis-list">
-              {taxis.map((taxi) => (
+              {taxis.map((taxi, index) => (
                 <button
                   key={taxi.id}
                   type="button"
                   className={taxi.id === selectedTaxiId ? "taxi-item taxi-item-active" : "taxi-item"}
                   onClick={() => setSelectedTaxiId(taxi.id)}
                 >
-                  <div className="taxi-item-title">{taxi.taxiNumber}</div>
-                  <div className="taxi-item-sub">
-                    {taxi.driverName} · {taxi.driverPhone}
+                  <div className="taxi-item-row">
+                    <div className="taxi-item-index">{index + 1}</div>
+                    <div className="taxi-item-meta">
+                      <div className="taxi-item-title">{taxi.taxiNumber}</div>
+                      <div className="taxi-item-sub">
+                        {taxi.driverName} · {taxi.driverPhone}
+                      </div>
+                    </div>
                   </div>
                 </button>
               ))}
@@ -303,6 +373,77 @@ function QrGeneratorPage() {
                 Save & generate
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {menuOpen && (
+        <div
+          className="drawer-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setMenuOpen(false)}
+        >
+          <div className="drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-head">
+              <div className="drawer-title">Menu</div>
+              <button type="button" className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <div className="drawer-list">
+              <button
+                type="button"
+                className="drawer-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.location.hash = "#/dashboard";
+                }}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                className="drawer-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.location.hash = "#/qr";
+                }}
+              >
+                QR codes
+              </button>
+              <button
+                type="button"
+                className="drawer-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setCreateModalOpen(true);
+                }}
+              >
+                Generate QR code
+              </button>
+              <button
+                type="button"
+                className="drawer-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.location.hash = "#/bookings";
+                }}
+              >
+                Bookings
+                {openBookingsCount > 0 && <span className="drawer-badge">{openBookingsCount}</span>}
+              </button>
+              <button
+                type="button"
+                className="drawer-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.location.hash = "#/history";
+                }}
+              >
+                History
+              </button>
+            </div>
           </div>
         </div>
       )}
