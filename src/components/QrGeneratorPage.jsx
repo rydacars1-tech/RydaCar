@@ -209,20 +209,25 @@ function QrGeneratorPage() {
         <div className="page-card">
           <div className="page-card-row">
             <h2 className="page-title-sm">Saved taxis</h2>
-            <button
-              type="button"
-              className="page-link"
-              onClick={() => {
-                setTaxis([]);
-                writeTaxis([]);
-                setSelectedTaxiId("");
-                setQrDataUrl("");
-                setBookingUrl("");
-              }}
-              disabled={taxis.length === 0}
-            >
-              Clear
-            </button>
+            <div className="card-actions">
+              <button type="button" className="card-primary" onClick={() => setCreateModalOpen(true)}>
+                Generate QR code
+              </button>
+              <button
+                type="button"
+                className="page-link"
+                onClick={() => {
+                  setTaxis([]);
+                  writeTaxis([]);
+                  setSelectedTaxiId("");
+                  setQrDataUrl("");
+                  setBookingUrl("");
+                }}
+                disabled={taxis.length === 0}
+              >
+                Clear
+              </button>
+            </div>
           </div>
 
           {taxis.length === 0 ? (
@@ -411,16 +416,6 @@ function QrGeneratorPage() {
                 }}
               >
                 QR codes
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setCreateModalOpen(true);
-                }}
-              >
-                Generate QR code
               </button>
               <button
                 type="button"
