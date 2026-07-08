@@ -1,27 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import * as QRCode from "qrcode";
-import logo from "../assets/logo.jpeg";
-
-const TAXIS_STORAGE_KEY = "ryda.taxis.v1";
-const BOOKINGS_STORAGE_KEY = "ryda.bookings.v1";
-
-function createId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+import AdminShell from "./admin/AdminShell.jsx";
+import { BOOKINGS_STORAGE_KEY, TAXIS_STORAGE_KEY, createId, readJsonArray, writeJsonArray } from "./admin/adminData.js";
 
 function readTaxis() {
-  try {
-    const raw = localStorage.getItem(TAXIS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeTaxis(nextTaxis) {
-  localStorage.setItem(TAXIS_STORAGE_KEY, JSON.stringify(nextTaxis));
+  return readJsonArray(TAXIS_STORAGE_KEY);
 }
 
 function normalizeTaxiNumber(value) {
@@ -34,29 +17,69 @@ function buildTaxiBookingUrl(taxiId) {
 }
 
 function readBookings() {
-  try {
-    const raw = localStorage.getItem(BOOKINGS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return readJsonArray(BOOKINGS_STORAGE_KEY);
 }
 
 function getOpenBookingsCount() {
-  return readBookings().filter((b) => (b?.status || "open") === "open").length;
+  return readBookings().filter((booking) => (booking?.status || "open") === "open").length;
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
+
+function formatCreatedDate(value) {
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit"
+    });
+  } catch {
+    return value || "";
+  }
+}
+
+function EditIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
 }
 
 function QrGeneratorPage() {
   const [taxis, setTaxis] = useState(() => readTaxis());
-  const [selectedTaxiId, setSelectedTaxiId] = useState("");
+  const [expandedTaxiId, setExpandedTaxiId] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [openBookingsCount, setOpenBookingsCount] = useState(() => getOpenBookingsCount());
-  const selectedTaxi = useMemo(
-    () => taxis.find((t) => t.id === selectedTaxiId) || null,
-    [taxis, selectedTaxiId]
-  );
+  const [qrPreviewByTaxiId, setQrPreviewByTaxiId] = useState({});
+  const [copyStateByTaxiId, setCopyStateByTaxiId] = useState({});
+  const [downloadingTaxiId, setDownloadingTaxiId] = useState("");
+  const [editingTaxiId, setEditingTaxiId] = useState("");
+  const [deletingTaxiId, setDeletingTaxiId] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [actionFeedback, setActionFeedback] = useState("");
+
+  const expandedTaxi = useMemo(() => taxis.find((taxi) => taxi.id === expandedTaxiId) || null, [taxis, expandedTaxiId]);
 
   const [taxiNumber, setTaxiNumber] = useState("");
   const [taxiName, setTaxiName] = useState("");
@@ -64,24 +87,24 @@ function QrGeneratorPage() {
   const [driverPhone, setDriverPhone] = useState("");
   const [errors, setErrors] = useState({});
 
-  const [qrDataUrl, setQrDataUrl] = useState("");
-  const [bookingUrl, setBookingUrl] = useState("");
-  const [copyState, setCopyState] = useState("idle");
-
   useEffect(() => {
     const id = setInterval(() => setOpenBookingsCount(getOpenBookingsCount()), 1500);
     return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
-    if (!selectedTaxi) return;
-    const url = buildTaxiBookingUrl(selectedTaxi.id);
-    setBookingUrl(url);
-    setQrDataUrl("");
-    QRCode.toDataURL(url, { width: 720, margin: 2 })
-      .then((dataUrl) => setQrDataUrl(dataUrl))
-      .catch(() => setQrDataUrl(""));
-  }, [selectedTaxi]);
+    if (!expandedTaxi || qrPreviewByTaxiId[expandedTaxi.id]) {
+      return;
+    }
+
+    QRCode.toDataURL(buildTaxiBookingUrl(expandedTaxi.id), { width: 720, margin: 2 })
+      .then((dataUrl) => {
+        setQrPreviewByTaxiId((current) => ({ ...current, [expandedTaxi.id]: dataUrl }));
+      })
+      .catch(() => {
+        setQrPreviewByTaxiId((current) => ({ ...current, [expandedTaxi.id]: "" }));
+      });
+  }, [expandedTaxi, qrPreviewByTaxiId]);
 
   function validate() {
     const nextErrors = {};
@@ -92,225 +115,316 @@ function QrGeneratorPage() {
     return Object.keys(nextErrors).length === 0;
   }
 
-  async function handleGenerate(event) {
-    event.preventDefault();
-    if (!validate()) return;
-
-    const nextTaxi = {
-      id: createId(),
-      taxiNumber: normalizeTaxiNumber(taxiNumber),
-      taxiName: taxiName.trim(),
-      driverName: driverName.trim(),
-      driverPhone: driverPhone.trim(),
-      createdAt: new Date().toISOString()
-    };
-
-    const nextTaxis = [nextTaxi, ...taxis];
-    setTaxis(nextTaxis);
-    writeTaxis(nextTaxis);
-    setSelectedTaxiId(nextTaxi.id);
-    setCreateModalOpen(false);
-
+  function resetForm() {
     setTaxiNumber("");
     setTaxiName("");
     setDriverName("");
     setDriverPhone("");
     setErrors({});
+    setEditingTaxiId("");
   }
 
-  async function copyLink() {
-    if (!bookingUrl) return;
-    setCopyState("copying");
+  function openCreateModal() {
+    resetForm();
+    setCreateModalOpen(true);
+  }
+
+  function openEditModal(taxi) {
+    setEditingTaxiId(taxi.id);
+    setTaxiNumber(taxi.taxiNumber || "");
+    setTaxiName(taxi.taxiName || "");
+    setDriverName(taxi.driverName || "");
+    setDriverPhone(taxi.driverPhone || "");
+    setErrors({});
+    setCreateModalOpen(true);
+  }
+
+  async function handleGenerate(event) {
+    event.preventDefault();
+    if (!validate()) return;
+
+    const taxiPayload = {
+      taxiNumber: normalizeTaxiNumber(taxiNumber),
+      taxiName: taxiName.trim(),
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim()
+    };
+
+    const nextTaxis = editingTaxiId
+      ? taxis.map((taxi) =>
+          taxi.id === editingTaxiId
+            ? {
+                ...taxi,
+                ...taxiPayload
+              }
+            : taxi
+        )
+      : [
+          {
+            id: createId(),
+            createdAt: new Date().toISOString(),
+            ...taxiPayload
+          },
+          ...taxis
+        ];
+
+    setTaxis(nextTaxis);
+    writeJsonArray(TAXIS_STORAGE_KEY, nextTaxis);
+    setExpandedTaxiId(editingTaxiId || nextTaxis[0]?.id || "");
+    setCreateModalOpen(false);
+    setActionFeedback(editingTaxiId ? "Taxi updated successfully." : "Taxi created successfully.");
+    resetForm();
+  }
+
+  async function getQrDataUrl(taxiId) {
+    if (qrPreviewByTaxiId[taxiId]) {
+      return qrPreviewByTaxiId[taxiId];
+    }
+
+    try {
+      const dataUrl = await QRCode.toDataURL(buildTaxiBookingUrl(taxiId), { width: 720, margin: 2 });
+      setQrPreviewByTaxiId((current) => ({ ...current, [taxiId]: dataUrl }));
+      return dataUrl;
+    } catch {
+      return "";
+    }
+  }
+
+  async function handleCopyLink(taxiId) {
+    const bookingUrl = buildTaxiBookingUrl(taxiId);
+    setCopyStateByTaxiId((current) => ({ ...current, [taxiId]: "copying" }));
+
     try {
       await navigator.clipboard.writeText(bookingUrl);
-      setCopyState("copied");
+      setCopyStateByTaxiId((current) => ({ ...current, [taxiId]: "copied" }));
     } catch {
-      setCopyState("failed");
+      setCopyStateByTaxiId((current) => ({ ...current, [taxiId]: "failed" }));
     } finally {
-      setTimeout(() => setCopyState("idle"), 1400);
+      window.setTimeout(() => {
+        setCopyStateByTaxiId((current) => ({ ...current, [taxiId]: "idle" }));
+      }, 1400);
+    }
+  }
+
+  async function handleDownloadQr(taxi) {
+    setDownloadingTaxiId(taxi.id);
+    const dataUrl = await getQrDataUrl(taxi.id);
+    if (dataUrl) {
+      downloadDataUrl(dataUrl, `${taxi.taxiNumber}-ryda-qr.png`);
+    }
+    setDownloadingTaxiId("");
+  }
+
+  async function handleTogglePreview(taxi) {
+    if (expandedTaxiId === taxi.id) {
+      setExpandedTaxiId("");
+      return;
+    }
+
+    setExpandedTaxiId(taxi.id);
+    await getQrDataUrl(taxi.id);
+  }
+
+  async function handleDeleteTaxi() {
+    if (!deleteCandidate) {
+      return;
+    }
+
+    setDeletingTaxiId(deleteCandidate.id);
+
+    try {
+      const nextTaxis = taxis.filter((taxi) => taxi.id !== deleteCandidate.id);
+      setTaxis(nextTaxis);
+      writeJsonArray(TAXIS_STORAGE_KEY, nextTaxis);
+      setQrPreviewByTaxiId((current) => {
+        const next = { ...current };
+        delete next[deleteCandidate.id];
+        return next;
+      });
+      setCopyStateByTaxiId((current) => {
+        const next = { ...current };
+        delete next[deleteCandidate.id];
+        return next;
+      });
+      if (expandedTaxiId === deleteCandidate.id) {
+        setExpandedTaxiId("");
+      }
+      setActionFeedback("Taxi deleted successfully.");
+      setDeleteCandidate(null);
+    } finally {
+      setDeletingTaxiId("");
     }
   }
 
   return (
-    <div className="page page-qr">
-      <header className="page-topbar">
-        <div className="topbar-left">
-          <div className="brand-mark">
-            <img src={logo} alt="Ryda" className="brand-mark-img" />
-          </div>
-        </div>
-        <div className="topbar-center">
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/dashboard";
-            }}
-          >
-            Dashboard
-          </button>
-          <button type="button" className="page-topbar-primary page-topbar-primary-active">
-            QR codes
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/bookings";
-            }}
-          >
-            Bookings
-            {openBookingsCount > 0 && <span className="tab-badge">{openBookingsCount}</span>}
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/history";
-            }}
-          >
-            History
-          </button>
-        </div>
-        <div className="topbar-right">
-          <button
-            type="button"
-            className="page-topbar-primary desktop-only"
-            onClick={() => setCreateModalOpen(true)}
-          >
-            Generate QR code
-          </button>
-          <button
-            type="button"
-            className="menu-button"
-            onClick={() => setMenuOpen(true)}
-            aria-label="Open menu"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      <main className="page-content">
-        <div className="page-card">
-          <div className="page-card-row">
-            <h2 className="page-title-sm">Saved taxis</h2>
-            <div className="card-actions">
-              <button type="button" className="card-primary" onClick={() => setCreateModalOpen(true)}>
-                Generate QR code
+    <AdminShell
+      activeNav="qr"
+      openBookingsCount={openBookingsCount}
+      title="QR Code Management"
+      actions={
+        <button type="button" className="admin-primary-button" onClick={openCreateModal}>
+          Generate QR code
+        </button>
+      }
+    >
+      <section className="admin-dashboard-grid">
+        <div className="admin-panel-card">
+          <div className="admin-section-head">
+            <div>
+              <div className="admin-section-title">Saved taxis</div>
+              <div className="admin-section-subtitle">Manage taxi QR entries in a cleaner table with inline preview below each row.</div>
+            </div>
+            <div className="admin-inline-actions">
+              <button type="button" className="admin-text-button" onClick={openCreateModal}>
+                Add new
               </button>
               <button
                 type="button"
-                className="page-link"
+                className="admin-text-button"
                 onClick={() => {
                   setTaxis([]);
-                  writeTaxis([]);
-                  setSelectedTaxiId("");
-                  setQrDataUrl("");
-                  setBookingUrl("");
+                  writeJsonArray(TAXIS_STORAGE_KEY, []);
+                  setExpandedTaxiId("");
+                  setQrPreviewByTaxiId({});
                 }}
                 disabled={taxis.length === 0}
               >
-                Clear
+                Clear all
               </button>
             </div>
           </div>
 
+          {actionFeedback ? <div className="admin-inline-feedback">{actionFeedback}</div> : null}
+
           {taxis.length === 0 ? (
-            <div className="page-empty">
-              No taxis yet. Click <span className="page-strong">Generate QR</span> to create your first taxi QR.
+            <div className="admin-empty-state">
+              <div className="admin-empty-state-title">No QR entries created yet</div>
+              <div className="admin-empty-state-copy">Start by generating your first taxi QR code for the customer booking flow.</div>
             </div>
           ) : (
-            <div className="taxis-list">
-              {taxis.map((taxi, index) => (
-                <button
-                  key={taxi.id}
-                  type="button"
-                  className={taxi.id === selectedTaxiId ? "taxi-item taxi-item-active" : "taxi-item"}
-                  onClick={() => setSelectedTaxiId(taxi.id)}
-                >
-                  <div className="taxi-item-row">
-                    <div className="taxi-item-index">{index + 1}</div>
-                    <div className="taxi-item-meta">
-                      <div className="taxi-item-title">{taxi.taxiNumber}</div>
-                      <div className="taxi-item-sub">
-                        {taxi.driverName} · {taxi.driverPhone}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
+            <div className="admin-table-wrap admin-table-wrap-rich">
+              <table className="admin-table admin-qr-table">
+                <thead>
+                  <tr>
+                    <th>Taxi</th>
+                    <th>Driver</th>
+                    <th>Created</th>
+                    <th>Buttons</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {taxis.map((taxi) => {
+                    const bookingUrl = buildTaxiBookingUrl(taxi.id);
+                    const isExpanded = expandedTaxiId === taxi.id;
+                    const qrDataUrl = qrPreviewByTaxiId[taxi.id] || "";
+                    const copyState = copyStateByTaxiId[taxi.id] || "idle";
+
+                    return [
+                      <tr key={taxi.id} className={isExpanded ? "admin-table-row-active" : ""}>
+                        <td>
+                          <div className="admin-table-title">{taxi.taxiNumber}</div>
+                        </td>
+                        <td>
+                          <div className="admin-table-title">{taxi.driverName}</div>
+                          <div className="admin-table-subtitle">{taxi.driverPhone}</div>
+                        </td>
+                        <td>{formatCreatedDate(taxi.createdAt)}</td>
+                        <td>
+                          <div className="admin-row-actions admin-row-actions-qr">
+                            <button type="button" className="admin-table-action" onClick={() => handleCopyLink(taxi.id)} title="Copy booking link">
+                              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy link"}
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-table-action admin-table-action-primary"
+                              onClick={() => handleDownloadQr(taxi)}
+                              disabled={downloadingTaxiId === taxi.id}
+                              title="Download QR code"
+                            >
+                              {downloadingTaxiId === taxi.id ? "Downloading..." : "Download QR"}
+                            </button>
+                            <button
+                              type="button"
+                              className={isExpanded ? "admin-table-action admin-table-action-active" : "admin-table-action"}
+                              onClick={() => handleTogglePreview(taxi)}
+                              aria-expanded={isExpanded}
+                              title={isExpanded ? "Hide QR preview" : "Preview QR code"}
+                            >
+                              {isExpanded ? "Hide Preview" : "Preview"}
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="admin-row-actions admin-row-actions-compact">
+                            <button
+                              type="button"
+                              className="admin-table-action admin-table-action-icon"
+                              onClick={() => openEditModal(taxi)}
+                              title="Edit taxi"
+                              disabled={deletingTaxiId === taxi.id}
+                            >
+                              <EditIcon />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-table-action admin-table-action-danger"
+                              onClick={() => setDeleteCandidate(taxi)}
+                              title="Delete taxi"
+                              disabled={deletingTaxiId === taxi.id}
+                            >
+                              <TrashIcon />
+                              <span>{deletingTaxiId === taxi.id ? "Deleting..." : "Delete"}</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>,
+                      <tr key={`${taxi.id}-preview`} className="admin-table-expand-row">
+                        <td colSpan="5" className="admin-table-expand-cell">
+                          <div className={isExpanded ? "admin-table-expand-inner admin-table-expand-inner-open" : "admin-table-expand-inner"}>
+                            <div className="admin-qr-inline-preview">
+                              <div className="admin-qr-box">
+                                {qrDataUrl ? (
+                                  <img src={qrDataUrl} alt={`${taxi.taxiNumber} QR code`} className="admin-qr-image" />
+                                ) : (
+                                  <div className="admin-qr-loading">Generating QR...</div>
+                                )}
+                              </div>
+
+                              <div className="admin-qr-inline-copy">
+                                <div className="admin-detail-grid">
+                                  <div className="admin-detail-item">
+                                    <div className="admin-detail-label">Taxi</div>
+                                    <div className="admin-detail-value">
+                                      {taxi.taxiNumber}
+                                      {taxi.taxiName ? ` · ${taxi.taxiName}` : ""}
+                                    </div>
+                                  </div>
+                                  <div className="admin-detail-item">
+                                    <div className="admin-detail-label">Driver</div>
+                                    <div className="admin-detail-value">
+                                      {taxi.driverName} · {taxi.driverPhone}
+                                    </div>
+                                  </div>
+                                  <div className="admin-detail-item">
+                                    <div className="admin-detail-label">Booking link</div>
+                                    <div className="admin-detail-value admin-detail-value-link">{bookingUrl}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ];
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-
-        {selectedTaxi && (
-          <div className="page-card">
-            <h2 className="page-title-sm">QR code</h2>
-            <div className="qr-wrap">
-              <div className="qr-box">
-                {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="Taxi booking QR code" className="qr-image" />
-                ) : (
-                  <div className="qr-loading">Generating QR…</div>
-                )}
-              </div>
-
-              <div className="qr-meta">
-                <div className="qr-kv">
-                  <div className="qr-k">Taxi</div>
-                  <div className="qr-v">
-                    {selectedTaxi.taxiNumber}
-                    {selectedTaxi.taxiName ? ` · ${selectedTaxi.taxiName}` : ""}
-                  </div>
-                </div>
-                <div className="qr-kv">
-                  <div className="qr-k">Driver</div>
-                  <div className="qr-v">
-                    {selectedTaxi.driverName} · {selectedTaxi.driverPhone}
-                  </div>
-                </div>
-                <div className="qr-kv">
-                  <div className="qr-k">Link</div>
-                  <div className="qr-v qr-link">{bookingUrl}</div>
-                </div>
-
-                <div className="qr-actions">
-                  <button type="button" className="form-secondary" onClick={copyLink} disabled={!bookingUrl}>
-                    {copyState === "copied"
-                      ? "Copied"
-                      : copyState === "failed"
-                        ? "Copy failed"
-                        : "Copy link"}
-                  </button>
-                  <a
-                    className={qrDataUrl ? "form-primary form-primary-link" : "form-primary form-primary-link disabled"}
-                    href={qrDataUrl || undefined}
-                    download={`${selectedTaxi.taxiNumber}-ryda-qr.png`}
-                    aria-disabled={!qrDataUrl}
-                  >
-                    Download QR
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
+      </section>
 
       {createModalOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
@@ -318,14 +432,19 @@ function QrGeneratorPage() {
             <button
               type="button"
               className="modal-close"
-              onClick={() => setCreateModalOpen(false)}
+              onClick={() => {
+                setCreateModalOpen(false);
+                resetForm();
+              }}
               aria-label="Close"
             >
               ×
             </button>
-            <div className="modal-title">Generate taxi QR</div>
+            <div className="modal-title">{editingTaxiId ? "Edit taxi QR" : "Generate taxi QR"}</div>
             <div className="modal-text">
-              Fill taxi and driver details. You can download and print the QR after saving.
+              {editingTaxiId
+                ? "Update taxi and driver details. The table will refresh immediately after saving."
+                : "Fill taxi and driver details. You can download and print the QR after saving."}
             </div>
 
             <form className="form" onSubmit={handleGenerate}>
@@ -334,7 +453,7 @@ function QrGeneratorPage() {
                 <input
                   className="form-input"
                   value={taxiNumber}
-                  onChange={(e) => setTaxiNumber(e.target.value)}
+                  onChange={(event) => setTaxiNumber(event.target.value)}
                   placeholder="e.g. TX-1024"
                 />
                 {errors.taxiNumber && <div className="form-error">{errors.taxiNumber}</div>}
@@ -345,7 +464,7 @@ function QrGeneratorPage() {
                 <input
                   className="form-input"
                   value={taxiName}
-                  onChange={(e) => setTaxiName(e.target.value)}
+                  onChange={(event) => setTaxiName(event.target.value)}
                   placeholder="e.g. Ryda Cab 1"
                 />
               </div>
@@ -356,7 +475,7 @@ function QrGeneratorPage() {
                   <input
                     className="form-input"
                     value={driverName}
-                    onChange={(e) => setDriverName(e.target.value)}
+                    onChange={(event) => setDriverName(event.target.value)}
                     placeholder="Required"
                   />
                   {errors.driverName && <div className="form-error">{errors.driverName}</div>}
@@ -367,7 +486,7 @@ function QrGeneratorPage() {
                   <input
                     className="form-input"
                     value={driverPhone}
-                    onChange={(e) => setDriverPhone(e.target.value)}
+                    onChange={(event) => setDriverPhone(event.target.value)}
                     placeholder="Required"
                   />
                   {errors.driverPhone && <div className="form-error">{errors.driverPhone}</div>}
@@ -375,74 +494,35 @@ function QrGeneratorPage() {
               </div>
 
               <button type="submit" className="form-primary">
-                Save & generate
+                {editingTaxiId ? "Save changes" : "Save & generate"}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {menuOpen && (
-        <div
-          className="drawer-overlay"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setMenuOpen(false)}
-        >
-          <div className="drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="drawer-head">
-              <div className="drawer-title">Menu</div>
-              <button type="button" className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close">
-                ×
-              </button>
+      {deleteCandidate ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <button type="button" className="modal-close" onClick={() => setDeleteCandidate(null)} aria-label="Close">
+              ×
+            </button>
+            <div className="modal-title">Delete taxi</div>
+            <div className="modal-text">
+              Are you sure you want to delete taxi <strong className="modal-code">{deleteCandidate.taxiNumber}</strong>? This removes the QR entry from the table.
             </div>
-            <div className="drawer-list">
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/dashboard";
-                }}
-              >
-                Dashboard
+            <div className="modal-actions">
+              <button type="button" className="admin-ghost-button" onClick={() => setDeleteCandidate(null)} disabled={deletingTaxiId === deleteCandidate.id}>
+                Cancel
               </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/qr";
-                }}
-              >
-                QR codes
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/bookings";
-                }}
-              >
-                Bookings
-                {openBookingsCount > 0 && <span className="drawer-badge">{openBookingsCount}</span>}
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/history";
-                }}
-              >
-                History
+              <button type="button" className="admin-danger-button" onClick={handleDeleteTaxi} disabled={deletingTaxiId === deleteCandidate.id}>
+                {deletingTaxiId === deleteCandidate.id ? "Deleting..." : "Delete taxi"}
               </button>
             </div>
           </div>
         </div>
-      )}
-    </div>
+      ) : null}
+    </AdminShell>
   );
 }
 

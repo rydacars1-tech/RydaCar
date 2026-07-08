@@ -1,326 +1,353 @@
-import { useEffect, useMemo, useState } from "react";
-import logo from "../assets/logo.jpeg";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AdminShell from "./admin/AdminShell.jsx";
+import DateRangeFilter from "./admin/DateRangeFilter.jsx";
+import { formatDateRangeLabel, getAdminSnapshot, getCurrentMonthDateRange, navigateTo } from "./admin/adminData.js";
 
-const TAXIS_STORAGE_KEY = "ryda.taxis.v1";
-const BOOKINGS_STORAGE_KEY = "ryda.bookings.v1";
-
-function readJsonArray(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function MetricCard({ label, value, hint, icon, tone = "default", onClick }) {
+  return (
+    <button type="button" className={`admin-metric-card admin-metric-card-${tone}`} onClick={onClick}>
+      <div className="admin-metric-top">
+        <div className="admin-metric-icon">{icon}</div>
+        <div className="admin-metric-label">{label}</div>
+      </div>
+      <div className="admin-metric-value">{value}</div>
+      <div className="admin-metric-hint">{hint}</div>
+    </button>
+  );
 }
 
-function normalizeStatus(booking) {
-  const status = booking?.status;
-  return status === "done" ? "done" : "open";
-}
-
-function pad2(value) {
-  return String(value).padStart(2, "0");
-}
-
-function currentMonthValue() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
-}
-
-function filterBookings(bookings, filterMode, filterValue) {
-  if (filterMode === "day") {
-    return bookings.filter((b) => String(b?.bookingDate || "") === filterValue);
-  }
-  if (filterMode === "year") {
-    return bookings.filter((b) => String(b?.bookingDate || "").slice(0, 4) === filterValue);
-  }
-  return bookings.filter((b) => String(b?.bookingDate || "").slice(0, 7) === filterValue);
-}
-
-function DashboardPage() {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    const id = setInterval(() => setRefreshKey((k) => k + 1), 2500);
-    return () => clearInterval(id);
-  }, []);
-
-  const taxisCount = useMemo(() => readJsonArray(TAXIS_STORAGE_KEY).length, [refreshKey]);
-  const allBookings = useMemo(() => readJsonArray(BOOKINGS_STORAGE_KEY), [refreshKey]);
-  const filteredBookings = useMemo(() => {
-    const month = currentMonthValue();
-    return filterBookings(allBookings, "month", month);
-  }, [allBookings]);
-
-  const counts = useMemo(() => {
-    const total = filteredBookings.length;
-    const pending = filteredBookings.filter((b) => normalizeStatus(b) === "open").length;
-    const done = filteredBookings.filter((b) => normalizeStatus(b) === "done").length;
-    return { total, pending, done };
-  }, [filteredBookings]);
+function StatusAnalyticsCard({ openCount, doneCount, totalBookings }) {
+  const total = Math.max(openCount + doneCount, 1);
+  const donePercent = Math.round((doneCount / total) * 100);
+  const openPercent = 100 - donePercent;
+  const style = {
+    background: `conic-gradient(#22c55e 0 ${donePercent}%, #ff5b6a ${donePercent}% 100%)`
+  };
 
   return (
-    <div className="page page-dashboard">
-      <header className="page-topbar">
-        <div className="topbar-left">
-          <div className="brand-mark">
-            <img src={logo} alt="Ryda" className="brand-mark-img" />
-          </div>
+    <div className="admin-status-card admin-analytics-card">
+      <div className="admin-section-head">
+        <div>
+          <div className="admin-section-title">Booking Status</div>
+          <div className="admin-section-subtitle">Live distribution of completed and pending requests.</div>
         </div>
+        <div className="admin-pill">Live</div>
+      </div>
 
-        <div className="topbar-center">
-          <button type="button" className="page-topbar-primary page-topbar-primary-active">
-            Dashboard
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/qr";
-            }}
-          >
-            QR codes
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/bookings";
-            }}
-          >
-            Bookings
-            {counts.pending > 0 && <span className="tab-badge">{counts.pending}</span>}
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/history";
-            }}
-          >
-            History
-          </button>
+      {totalBookings === 0 ? (
+        <div className="admin-empty-state">
+          <div className="admin-empty-state-title">No booking status yet</div>
+          <div className="admin-empty-state-copy">The status chart appears after the first booking is added.</div>
         </div>
+      ) : (
+        <div className="admin-status-card-body">
+          <div className="admin-status-ring-wrap">
+            <div className="admin-status-chip-row">
+              <div className="admin-status-chip admin-status-chip-green">
+                <span>Completed</span>
+                <strong>{donePercent}%</strong>
+              </div>
+              <div className="admin-status-chip admin-status-chip-red">
+                <span>Pending</span>
+                <strong>{openPercent}%</strong>
+              </div>
+            </div>
 
-        <div className="topbar-right">
-          <button type="button" className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Open menu">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      <main className="page-content">
-        <div className="page-card">
-          <div className="dash-head">
-            <div>
-              <h1 className="page-title">Dashboard</h1>
+            <div className="admin-status-ring" style={style}>
+              <div className="admin-status-ring-center">
+                <strong>{donePercent}%</strong>
+                <span>Completed</span>
+              </div>
             </div>
           </div>
 
-          <div className="dash-grid">
-            <button
-              type="button"
-              className="dash-card dash-card-link"
-              onClick={() => {
-                window.location.hash = "#/bookings";
-              }}
-            >
-              <div className="dash-card-top">
-                <div className="dash-card-icon">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" />
-                    <path d="M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2" />
-                    <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2" />
-                    <line x1="9" y1="12" x2="15" y2="12" />
-                    <line x1="9" y1="16" x2="15" y2="16" />
-                  </svg>
-                </div>
-                <div className="dash-card-label">Bookings</div>
-              </div>
-              <div className="dash-card-value">{counts.total}</div>
-              <div className="dash-card-sub">In selected filter</div>
-            </button>
-
-            <button
-              type="button"
-              className="dash-card dash-card-link"
-              onClick={() => {
-                window.location.hash = "#/qr";
-              }}
-            >
-              <div className="dash-card-top">
-                <div className="dash-card-icon">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
-                    <path d="M14 14h3v3h-3z" />
-                    <path d="M20 14h1v1h-1z" />
-                    <path d="M14 20h1v1h-1z" />
-                    <path d="M18 18h3v3h-3z" />
-                  </svg>
-                </div>
-                <div className="dash-card-label">QR codes</div>
-              </div>
-              <div className="dash-card-value">{taxisCount}</div>
-              <div className="dash-card-sub">Total taxis saved</div>
-            </button>
-
-            <button
-              type="button"
-              className="dash-card dash-card-link"
-              onClick={() => {
-                window.location.hash = "#/history";
-              }}
-            >
-              <div className="dash-card-top">
-                <div className="dash-card-icon dash-card-icon-done">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M9 12l2 2 4-4" />
-                    <circle cx="12" cy="12" r="10" />
-                  </svg>
-                </div>
-                <div className="dash-card-label">Done</div>
-              </div>
-              <div className="dash-card-value">{counts.done}</div>
-              <div className="dash-card-sub">Completed bookings</div>
-            </button>
-
-            <button
-              type="button"
-              className="dash-card dash-card-accent dash-card-link"
-              onClick={() => {
-                window.location.hash = "#/bookings";
-              }}
-            >
-              <div className="dash-card-top">
-                <div className="dash-card-icon dash-card-icon-pending">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 6v6l4 2" />
-                  </svg>
-                </div>
-                <div className="dash-card-label">Pending</div>
-              </div>
-              <div className="dash-card-value">{counts.pending}</div>
-              <div className="dash-card-sub">Need operator action</div>
-            </button>
-          </div>
-        </div>
-      </main>
-
-      {menuOpen && (
-        <div className="drawer-overlay" role="dialog" aria-modal="true" onClick={() => setMenuOpen(false)}>
-          <div className="drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="drawer-head">
-              <div className="drawer-title">Menu</div>
-              <button type="button" className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close">
-                ×
-              </button>
+          <div className="admin-status-legend admin-status-legend-wide">
+            <div className="admin-status-legend-item">
+                <span className="admin-status-swatch admin-status-swatch-green" />
+              <span>Completed</span>
+              <strong>{doneCount}</strong>
             </div>
-            <div className="drawer-list">
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/dashboard";
-                }}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/qr";
-                }}
-              >
-                QR codes
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/bookings";
-                }}
-              >
-                Bookings
-                {counts.pending > 0 && <span className="drawer-badge">{counts.pending}</span>}
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/history";
-                }}
-              >
-                History
-              </button>
+            <div className="admin-status-legend-item">
+              <span className="admin-status-swatch admin-status-swatch-red" />
+              <span>Pending</span>
+              <strong>{openCount}</strong>
+            </div>
+            <div className="admin-status-legend-item">
+              <span className="admin-status-swatch admin-status-swatch-soft" />
+              <span>Total</span>
+              <strong>{totalBookings}</strong>
             </div>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function buildSmoothPath(points) {
+  if (points.length === 0) {
+    return "";
+  }
+
+  if (points.length === 1) {
+    return `M ${points[0].x} ${points[0].y}`;
+  }
+
+  let path = `M ${points[0].x} ${points[0].y}`;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const middleX = (current.x + next.x) / 2;
+    const middleY = (current.y + next.y) / 2;
+    path += ` Q ${current.x} ${current.y} ${middleX} ${middleY}`;
+  }
+
+  const last = points[points.length - 1];
+  path += ` T ${last.x} ${last.y}`;
+
+  return path;
+}
+
+function TrendAnalyticsCard({ items }) {
+  const [activeIndex, setActiveIndex] = useState(items.length > 0 ? items.length - 1 : null);
+  const width = 560;
+  const height = 250;
+  const paddingX = 26;
+  const paddingTop = 24;
+  const paddingBottom = 42;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const max = Math.max(...items.map((item) => item.count), 1);
+  const baseline = height - paddingBottom;
+  const hasData = items.some((item) => item.count > 0);
+  const points = items.map((item, index) => {
+    const progress = items.length === 1 ? 0.5 : index / Math.max(items.length - 1, 1);
+    return {
+      ...item,
+      x: paddingX + progress * (width - paddingX * 2),
+      y: paddingTop + chartHeight - (item.count / max) * chartHeight
+    };
+  });
+  const linePath = buildSmoothPath(points);
+  const areaPath = points.length
+    ? `${linePath} L ${points[points.length - 1].x} ${baseline} L ${points[0].x} ${baseline} Z`
+    : "";
+  const activePoint = activeIndex === null ? null : points[activeIndex] || null;
+  const topMonth = items.reduce((best, item) => (item.count > best.count ? item : best), items[0] || { label: "-", count: 0 });
+
+  useEffect(() => {
+    setActiveIndex(items.length > 0 ? items.length - 1 : null);
+  }, [items]);
+
+  return (
+    <div className="admin-panel-card admin-analytics-card">
+      <div className="admin-section-head">
+        <div>
+          <div className="admin-section-title">Booking Trend</div>
+          <div className="admin-section-subtitle">Curved monthly booking performance from the live dashboard data.</div>
+        </div>
+        <div className="admin-pill">{topMonth.label} peak</div>
+      </div>
+
+      {!hasData ? (
+        <div className="admin-empty-state">
+          <div className="admin-empty-state-title">No trend data yet</div>
+          <div className="admin-empty-state-copy">Monthly analytics appear once bookings start coming in.</div>
+        </div>
+      ) : (
+        <div className="admin-line-chart-shell">
+          <div className="admin-line-chart-highlights">
+            <div className="admin-line-chart-highlight">
+              <span>Peak month</span>
+              <strong>{topMonth.label}</strong>
+            </div>
+            <div className="admin-line-chart-highlight">
+              <span>Bookings</span>
+              <strong>{topMonth.count}</strong>
+            </div>
+          </div>
+
+          <svg viewBox={`0 0 ${width} ${height}`} className="admin-line-chart" role="img" aria-label="Booking trend chart">
+            <defs>
+              <linearGradient id="adminTrendAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#366dff" stopOpacity="0.34" />
+                <stop offset="100%" stopColor="#366dff" stopOpacity="0.03" />
+              </linearGradient>
+            </defs>
+
+            {[0, 0.5, 1].map((marker) => {
+              const y = paddingTop + chartHeight * marker;
+              return <line key={marker} x1={paddingX} x2={width - paddingX} y1={y} y2={y} className="admin-line-grid" />;
+            })}
+
+            <path d={areaPath} className="admin-line-area" />
+            <path d={linePath} className="admin-line-path" />
+
+            {points.map((point, index) => (
+              <g key={point.label}>
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={activeIndex === index ? 6 : 4}
+                  className={activeIndex === index ? "admin-line-point admin-line-point-active" : "admin-line-point"}
+                  onMouseEnter={() => setActiveIndex(index)}
+                />
+                <text x={point.x} y={height - 12} textAnchor="middle" className="admin-line-label">
+                  {point.label}
+                </text>
+              </g>
+            ))}
+          </svg>
+
+          {activePoint ? (
+            <div
+              className="admin-line-tooltip"
+              style={{
+                left: `${(activePoint.x / width) * 100}%`,
+                top: `${Math.max((activePoint.y / height) * 100 - 8, 10)}%`
+              }}
+            >
+              <strong>{activePoint.label}</strong>
+              <span>{activePoint.count} bookings</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DashboardPage() {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [range, setRange] = useState(() => getCurrentMonthDateRange());
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setRefreshKey((key) => key + 1), 2500);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  const allSnapshot = useMemo(() => getAdminSnapshot(), [refreshKey]);
+  const snapshot = useMemo(() => getAdminSnapshot({ range }), [refreshKey, range]);
+  const completionRate = snapshot.totals.bookings
+    ? `${Math.round((snapshot.totals.done / snapshot.totals.bookings) * 100)}%`
+    : "0%";
+  const metricCards = [
+    {
+      label: "Total bookings",
+      value: snapshot.totals.bookings,
+      hint: "Recorded bookings",
+      tone: "neutral",
+      onClick: () => navigateTo("#/bookings"),
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 6h13" />
+          <path d="M8 12h13" />
+          <path d="M8 18h13" />
+          <path d="M3 6h.01" />
+          <path d="M3 12h.01" />
+          <path d="M3 18h.01" />
+        </svg>
+      )
+    },
+    {
+      label: "Active QR codes",
+      value: snapshot.totals.taxis,
+      hint: "QR codes ready",
+      tone: "sky",
+      onClick: () => navigateTo("#/qr"),
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5" />
+          <path d="M14 14h3v3h-3z" />
+          <path d="M18 18h3v3h-3z" />
+        </svg>
+      )
+    },
+    {
+      label: "Pending requests",
+      value: snapshot.totals.open,
+      hint: "Awaiting action",
+      tone: "danger",
+      onClick: () => navigateTo("#/bookings"),
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      )
+    },
+    {
+      label: "Completion rate",
+      value: completionRate,
+      hint: "Ride completion",
+      tone: "dark",
+      onClick: () => navigateTo("#/history"),
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      )
+    }
+  ];
+
+  function runFilterUpdate(nextRange) {
+    window.clearTimeout(timerRef.current);
+    setLoading(true);
+    setRange(nextRange);
+    timerRef.current = window.setTimeout(() => setLoading(false), 220);
+  }
+
+  return (
+    <AdminShell
+      activeNav="dashboard"
+      openBookingsCount={allSnapshot.totals.open}
+      title="Dashboard"
+      actions={
+        <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
+      }
+    >
+      <section className="admin-dashboard-grid">
+        <div className="admin-dashboard-main">
+          {loading ? (
+            <div className="admin-panel-card">
+              <div className="admin-loading-state">Updating dashboard data for {formatDateRangeLabel(range)}...</div>
+            </div>
+          ) : (
+            <>
+              <div className="admin-metrics-grid">
+                {metricCards.map((card) => (
+                  <MetricCard key={card.label} {...card} />
+                ))}
+              </div>
+
+              <div className="admin-analytics-grid">
+                <StatusAnalyticsCard
+                  openCount={snapshot.totals.open}
+                  doneCount={snapshot.totals.done}
+                  totalBookings={snapshot.totals.bookings}
+                />
+                <TrendAnalyticsCard items={snapshot.monthlyBookings} />
+              </div>
+
+              {snapshot.totals.bookings === 0 && snapshot.totals.taxis === 0 ? (
+                <div className="admin-panel-card">
+                  <div className="admin-empty-state">
+                    <div className="admin-empty-state-title">No dashboard data for this range</div>
+                    <div className="admin-empty-state-copy">Try another date range to view bookings, QR activity, and revenue performance.</div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </section>
+    </AdminShell>
   );
 }
 

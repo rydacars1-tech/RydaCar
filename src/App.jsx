@@ -3,6 +3,10 @@ import DashboardPage from "./components/DashboardPage.jsx";
 import QrGeneratorPage from "./components/QrGeneratorPage.jsx";
 import BookingPage from "./components/BookingPage.jsx";
 import OperatorPage from "./components/OperatorPage.jsx";
+import UserManagementPage from "./components/UserManagementPage.jsx";
+import SettingsPage from "./components/SettingsPage.jsx";
+import EmailPage from "./components/EmailPage.jsx";
+import RevenuePage from "./components/RevenuePage.jsx";
 
 function parseHashRoute(hashValue) {
   const raw = (hashValue || "").replace(/^#/, "");
@@ -41,6 +45,22 @@ function App() {
   if (route.path === "/bookings" || route.path === "/operator" || route.path === "/history") {
     const initialTab = route.path === "/history" ? "history" : route.query.tab || "bookings";
     return <OperatorPage initialTab={initialTab} />;
+  }
+
+  if (route.path === "/users") {
+    return <UserManagementPage />;
+  }
+
+  if (route.path === "/settings") {
+    return <SettingsPage />;
+  }
+
+  if (route.path === "/emails") {
+    return <EmailPage />;
+  }
+
+  if (route.path === "/revenue") {
+    return <RevenuePage />;
   }
 
   return <DashboardPage />;

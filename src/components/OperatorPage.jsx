@@ -1,46 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
-import logo from "../assets/logo.jpeg";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AdminShell from "./admin/AdminShell.jsx";
+import DateRangeFilter from "./admin/DateRangeFilter.jsx";
+import {
+  BOOKINGS_STORAGE_KEY,
+  filterItemsByDateRange,
+  formatDateRangeLabel,
+  formatDateTime,
+  getBookingDateValue,
+  getCurrentMonthDateRange,
+  navigateTo,
+  normalizeBookingStatus,
+  readJsonArray,
+  writeJsonArray
+} from "./admin/adminData.js";
 
-const BOOKINGS_STORAGE_KEY = "ryda.bookings.v1";
-
-function readBookings() {
-  try {
-    const raw = localStorage.getItem(BOOKINGS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeBookings(nextBookings) {
-  localStorage.setItem(BOOKINGS_STORAGE_KEY, JSON.stringify(nextBookings));
-}
-
-function formatDateTime(iso) {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  } catch {
-    return iso || "";
-  }
-}
-
-function normalizeStatus(booking) {
-  const status = booking?.status;
-  return status === "done" ? "done" : "open";
+function CopyIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
 }
 
 function OperatorPage({ initialTab = "bookings" }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [tab, setTab] = useState(initialTab);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const allBookings = useMemo(() => readBookings(), [refreshKey]);
+  const [copiedPhoneKey, setCopiedPhoneKey] = useState("");
+  const [range, setRange] = useState(() => getCurrentMonthDateRange());
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef(null);
+  const allBookings = useMemo(() => readJsonArray(BOOKINGS_STORAGE_KEY), [refreshKey]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -51,16 +41,20 @@ function OperatorPage({ initialTab = "bookings" }) {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
   const openBookings = useMemo(
-    () => allBookings.filter((b) => normalizeStatus(b) === "open"),
+    () => allBookings.filter((b) => normalizeBookingStatus(b) === "open"),
     [allBookings]
   );
   const doneBookings = useMemo(
-    () => allBookings.filter((b) => normalizeStatus(b) === "done"),
+    () => allBookings.filter((b) => normalizeBookingStatus(b) === "done"),
     [allBookings]
   );
 
-  const shown = tab === "history" ? doneBookings : openBookings;
+  const filteredOpenBookings = useMemo(() => filterItemsByDateRange(openBookings, range, getBookingDateValue), [openBookings, range]);
+  const filteredDoneBookings = useMemo(() => filterItemsByDateRange(doneBookings, range, getBookingDateValue), [doneBookings, range]);
+  const shown = tab === "history" ? filteredDoneBookings : filteredOpenBookings;
   const openCount = openBookings.length;
 
   function markDone(bookingId) {
@@ -68,237 +62,187 @@ function OperatorPage({ initialTab = "bookings" }) {
       if (b.id !== bookingId) return b;
       return { ...b, status: "done", doneAt: new Date().toISOString() };
     });
-    writeBookings(next);
+    writeJsonArray(BOOKINGS_STORAGE_KEY, next);
     setRefreshKey((k) => k + 1);
   }
 
+  function clearBookings() {
+    writeJsonArray(BOOKINGS_STORAGE_KEY, []);
+    setRefreshKey((k) => k + 1);
+  }
+
+  async function copyPhoneNumber(phone, key, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!phone) return;
+
+    try {
+      await navigator.clipboard.writeText(phone);
+      setCopiedPhoneKey(key);
+      window.setTimeout(() => {
+        setCopiedPhoneKey((current) => (current === key ? "" : current));
+      }, 1400);
+    } catch {
+      setCopiedPhoneKey("");
+    }
+  }
+
+  function runFilterUpdate(nextRange) {
+    window.clearTimeout(timerRef.current);
+    setLoading(true);
+    setRange(nextRange);
+    timerRef.current = window.setTimeout(() => setLoading(false), 220);
+  }
+
   return (
-    <div className="page page-operator">
-      <header className="page-topbar">
-        <div className="topbar-left">
-          <div className="brand-mark">
-            <img src={logo} alt="Ryda" className="brand-mark-img" />
+    <AdminShell
+      activeNav="bookings"
+      openBookingsCount={openCount}
+      title="Bookings"
+      actions={
+        <>
+          <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
+          <button type="button" className="admin-ghost-button" onClick={() => setRefreshKey((k) => k + 1)}>
+            Refresh
+          </button>
+          <button type="button" className="admin-primary-button" onClick={() => navigateTo("#/qr")}>
+            Generate QR
+          </button>
+        </>
+      }
+      secondaryTabs={[
+        {
+          id: "bookings",
+          label: "Active bookings",
+          badge: openCount > 0 ? String(openCount) : "",
+          active: tab === "bookings",
+          onClick: () => {
+            setTab("bookings");
+            navigateTo("#/bookings");
+          }
+        },
+        {
+          id: "history",
+          label: "History",
+          badge: doneBookings.length > 0 ? String(doneBookings.length) : "",
+          active: tab === "history",
+          onClick: () => {
+            setTab("history");
+            navigateTo("#/history");
+          }
+        }
+      ]}
+    >
+      <section className="admin-panel-card">
+        <div className="admin-section-head">
+          <div>
+            <div className="admin-section-title">{tab === "history" ? "Completed booking history" : "Pending booking queue"}</div>
+          </div>
+          <div className="admin-inline-actions">
+            <button type="button" className="admin-text-button" disabled={allBookings.length === 0} onClick={clearBookings}>
+              Clear all
+            </button>
           </div>
         </div>
-        <div className="topbar-center">
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/dashboard";
-            }}
-          >
-            Dashboard
-          </button>
-          <button
-            type="button"
-            className="page-topbar-primary"
-            onClick={() => {
-              window.location.hash = "#/qr";
-            }}
-          >
-            QR codes
-          </button>
-          <button
-            type="button"
-            className={tab === "bookings" ? "page-topbar-primary page-topbar-primary-active" : "page-topbar-primary"}
-            onClick={() => {
-              setTab("bookings");
-            }}
-          >
-            Bookings
-            {openCount > 0 && <span className="tab-badge">{openCount}</span>}
-          </button>
-          <button
-            type="button"
-            className={tab === "history" ? "page-topbar-primary page-topbar-primary-active" : "page-topbar-primary"}
-            onClick={() => {
-              setTab("history");
-            }}
-          >
-            History
-          </button>
-        </div>
-        <div className="topbar-right">
-          <button
-            type="button"
-            className="menu-button"
-            onClick={() => setMenuOpen(true)}
-            aria-label="Open menu"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-            </svg>
-          </button>
-        </div>
-      </header>
 
-      <main className="page-content">
-        <div className="page-card">
-          <div className="page-card-row">
-            <h1 className="page-title">{tab === "history" ? "History" : "Bookings"}</h1>
-            <div className="operator-actions">
-              <button
-                type="button"
-                className="page-link"
-                onClick={() => setRefreshKey((k) => k + 1)}
-              >
-                Refresh
-              </button>
-              <button
-                type="button"
-                className="page-link"
-                disabled={allBookings.length === 0}
-                onClick={() => {
-                  writeBookings([]);
-                  setRefreshKey((k) => k + 1);
-                }}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {shown.length === 0 ? (
-            <div className="page-empty">
+        {loading ? (
+          <div className="admin-loading-state">Updating bookings for {formatDateRangeLabel(range)}...</div>
+        ) : shown.length === 0 ? (
+          <div className="admin-empty-state">
+            <div className="admin-empty-state-title">{tab === "history" ? "No completed bookings yet" : "No active bookings yet"}</div>
+            <div className="admin-empty-state-copy">
               {tab === "history"
-                ? "No completed bookings yet."
-                : "No bookings yet. They will appear here after QR bookings are submitted."}
-            </div>
-          ) : (
-            <div className="operator-list">
-              {shown.map((b, index) => (
-                <div key={b.id} className="operator-item">
-                  <div className="operator-top">
-                    <div className="operator-ref">
-                      <div className="operator-ref-label">Booking</div>
-                      <div className="operator-ref-value">#{index + 1}</div>
-                    </div>
-                    <div className="operator-time">{formatDateTime(b.createdAt)}</div>
-                  </div>
-
-                  <div className="operator-grid">
-                    <div className="operator-kv">
-                      <div className="operator-k">Taxi</div>
-                      <div className="operator-v">
-                        {b.taxiNumber}
-                        {b.taxiName ? ` · ${b.taxiName}` : ""}
-                      </div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Driver</div>
-                      <div className="operator-v">
-                        {b.driverName} · {b.driverPhone}
-                      </div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Customer</div>
-                      <div className="operator-v">
-                        {b.customerName} · {b.customerPhone}
-                      </div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Booking date</div>
-                      <div className="operator-v">{b.bookingDate}</div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Pickup</div>
-                      <div className="operator-v">{b.pickup}</div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Drop-off</div>
-                      <div className="operator-v">{b.dropoff}</div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">KM</div>
-                      <div className="operator-v">{b.km || "—"}</div>
-                    </div>
-                    <div className="operator-kv">
-                      <div className="operator-k">Price</div>
-                      <div className="operator-v">{b.price || "—"}</div>
-                    </div>
-                  </div>
-
-                  {tab !== "history" && (
-                    <button type="button" className="operator-done" onClick={() => markDone(b.id)}>
-                      Done
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {menuOpen && (
-        <div className="drawer-overlay" role="dialog" aria-modal="true" onClick={() => setMenuOpen(false)}>
-          <div className="drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="drawer-head">
-              <div className="drawer-title">Menu</div>
-              <button type="button" className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close">
-                ×
-              </button>
-            </div>
-            <div className="drawer-list">
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/dashboard";
-                }}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  window.location.hash = "#/qr";
-                }}
-              >
-                QR codes
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setTab("bookings");
-                }}
-              >
-                Bookings
-                {openCount > 0 && <span className="drawer-badge">{openCount}</span>}
-              </button>
-              <button
-                type="button"
-                className="drawer-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setTab("history");
-                }}
-              >
-                History
-              </button>
+                ? "Completed rides in the selected date range will appear here after you mark them done."
+                : "Bookings inside the selected date range will appear here automatically."}
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        ) : (
+          <div className="admin-table-wrap admin-table-wrap-rich">
+            <table className="admin-table admin-bookings-table">
+              <thead>
+                <tr>
+                  <th>Booking</th>
+                  <th>Customer</th>
+                  <th>Driver</th>
+                  <th>Route</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((booking, index) => (
+                  <tr key={booking.id} className="admin-bookings-row">
+                    <td>
+                      <div className="admin-booking-count">{index + 1}</div>
+                    </td>
+                    <td>
+                      <div className="admin-table-title">{booking.customerName}</div>
+                      <div className="admin-phone-row">
+                        <span className="admin-table-subtitle">{booking.customerPhone}</span>
+                        <button
+                          type="button"
+                          className="admin-copy-icon-button"
+                          onClick={(event) => copyPhoneNumber(booking.customerPhone, `customer-${booking.id}`, event)}
+                          aria-label={`Copy customer phone number ${booking.customerPhone}`}
+                          title="Copy phone number"
+                        >
+                          <CopyIcon />
+                        </button>
+                        {copiedPhoneKey === `customer-${booking.id}` ? <span className="admin-copy-feedback">Phone number copied.</span> : null}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="admin-table-title">{booking.driverName}</div>
+                      <div className="admin-phone-row">
+                        <span className="admin-table-subtitle">{booking.driverPhone}</span>
+                        <button
+                          type="button"
+                          className="admin-copy-icon-button"
+                          onClick={(event) => copyPhoneNumber(booking.driverPhone, `driver-${booking.id}`, event)}
+                          aria-label={`Copy driver phone number ${booking.driverPhone}`}
+                          title="Copy phone number"
+                        >
+                          <CopyIcon />
+                        </button>
+                        {copiedPhoneKey === `driver-${booking.id}` ? <span className="admin-copy-feedback">Phone number copied.</span> : null}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="admin-route-inline" title={`${booking.pickup} -> ${booking.dropoff}`}>
+                        <span className="admin-route-inline-text">{booking.pickup}</span>
+                        <span className="admin-route-inline-arrow" aria-hidden="true">
+                          →
+                        </span>
+                        <span className="admin-route-inline-text">{booking.dropoff}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="admin-table-title">{booking.bookingDate}</div>
+                      <div className="admin-table-subtitle">{formatDateTime(booking.createdAt)}</div>
+                    </td>
+                    <td>
+                      <span className={tab === "history" ? "admin-status-badge admin-status-badge-done" : "admin-status-badge admin-status-badge-open"}>
+                        {tab === "history" ? "Completed" : "Pending"}
+                      </span>
+                    </td>
+                    <td>
+                      {tab === "history" ? (
+                        <span className="admin-table-muted">Archived</span>
+                      ) : (
+                        <button type="button" className="admin-row-action admin-row-action-premium" onClick={() => markDone(booking.id)}>
+                          Mark done
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </AdminShell>
   );
 }
 
