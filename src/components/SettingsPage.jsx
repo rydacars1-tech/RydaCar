@@ -1,30 +1,181 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
-import { getAdminSnapshot } from "./admin/adminData.js";
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+
+const DEFAULT_SETTINGS = {
+  pricing: {
+    baseFare: 7.5,
+    perKmRate: 1.2,
+    minimumBookingAmount: 10,
+    nightSurcharge: 15
+  },
+  notifications: {
+    emailEnabled: true,
+    smsEnabled: false,
+    automaticAssignment: true
+  },
+  stripe: {
+    publishableKey: "pk_test_placeholder",
+    currency: "GBP"
+  },
+  email: {
+    fromEmail: "noreply@ryda.com"
+  },
+  maps: {
+    apiKey: ""
+  }
+};
 
 function SettingsPage() {
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [smsEnabled, setSmsEnabled] = useState(false);
-  const [automaticAssignment, setAutomaticAssignment] = useState(true);
-  const snapshot = useMemo(() => getAdminSnapshot(), []);
+  const { authenticatedRequest, user } = useAdminAuth();
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [draft, setDraft] = useState(DEFAULT_SETTINGS);
+  const [openBookingsCount, setOpenBookingsCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const canSave = user?.role === "super_admin";
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSettings() {
+      setLoading(true);
+      setFeedback("");
+
+      try {
+        const [settingsPayload, statsPayload] = await Promise.all([
+          authenticatedRequest("/settings", { method: "GET" }),
+          authenticatedRequest("/dashboard/admin", { method: "GET" })
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        const merged = {
+          pricing: {
+            ...DEFAULT_SETTINGS.pricing,
+            ...(settingsPayload.data?.pricing || {})
+          },
+          notifications: {
+            ...DEFAULT_SETTINGS.notifications,
+            ...(settingsPayload.data?.notifications || {})
+          },
+          stripe: {
+            ...DEFAULT_SETTINGS.stripe,
+            ...(settingsPayload.data?.stripe || {})
+          },
+          email: {
+            ...DEFAULT_SETTINGS.email,
+            ...(settingsPayload.data?.email || {})
+          },
+          maps: {
+            ...DEFAULT_SETTINGS.maps,
+            ...(settingsPayload.data?.maps || {})
+          }
+        };
+
+        setSettings(merged);
+        setDraft(merged);
+        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
+      } catch (error) {
+        if (active) {
+          setFeedback(error?.message || "Unable to load settings.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadSettings();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
+
+  function updateSection(section, key, value) {
+    setDraft((current) => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: value
+      }
+    }));
+  }
+
+  function resetChanges() {
+    setDraft(settings);
+    setFeedback("Changes reset.");
+  }
+
+  async function saveSettings() {
+    if (!canSave || saving) {
+      return;
+    }
+
+    setSaving(true);
+    setFeedback("");
+
+    try {
+      const payload = await authenticatedRequest("/settings", {
+        method: "PATCH",
+        body: JSON.stringify(draft)
+      });
+
+      const merged = {
+        pricing: {
+          ...DEFAULT_SETTINGS.pricing,
+          ...(payload.data?.pricing || {})
+        },
+        notifications: {
+          ...DEFAULT_SETTINGS.notifications,
+          ...(payload.data?.notifications || {})
+        },
+        stripe: {
+          ...DEFAULT_SETTINGS.stripe,
+          ...(payload.data?.stripe || {})
+        },
+        email: {
+          ...DEFAULT_SETTINGS.email,
+          ...(payload.data?.email || {})
+        },
+        maps: {
+          ...DEFAULT_SETTINGS.maps,
+          ...(payload.data?.maps || {})
+        }
+      };
+
+      setSettings(merged);
+      setDraft(merged);
+      setFeedback("Settings saved successfully.");
+    } catch (error) {
+      setFeedback(error?.message || "Unable to save settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <AdminShell
       activeNav="settings"
-      openBookingsCount={snapshot.totals.open}
+      openBookingsCount={openBookingsCount}
       title="Settings"
-      subtitle="A polished configuration screen for pricing, notifications, payments, and system behavior, ready for future backend wiring."
       actions={
         <>
-          <button type="button" className="admin-ghost-button">
+          <button type="button" className="admin-ghost-button" onClick={resetChanges} disabled={loading || saving}>
             Reset changes
           </button>
-          <button type="button" className="admin-primary-button">
-            Save settings
+          <button type="button" className="admin-primary-button" onClick={saveSettings} disabled={!canSave || loading || saving}>
+            {saving ? "Saving..." : "Save settings"}
           </button>
         </>
       }
     >
+      {feedback ? <div className="admin-inline-feedback">{feedback}</div> : null}
       <section className="admin-two-column-layout">
         <div className="admin-stack-layout">
           <div className="admin-panel-card">
@@ -38,19 +189,27 @@ function SettingsPage() {
             <div className="admin-form-grid">
               <div className="admin-form-field">
                 <label className="admin-field-label">Base fare</label>
-                <input className="admin-input" defaultValue="7.50" />
+                <input className="admin-input" value={draft.pricing.baseFare} onChange={(event) => updateSection("pricing", "baseFare", Number(event.target.value))} />
               </div>
               <div className="admin-form-field">
                 <label className="admin-field-label">Per KM fare</label>
-                <input className="admin-input" defaultValue="1.20" />
+                <input className="admin-input" value={draft.pricing.perKmRate} onChange={(event) => updateSection("pricing", "perKmRate", Number(event.target.value))} />
               </div>
               <div className="admin-form-field">
                 <label className="admin-field-label">Minimum booking amount</label>
-                <input className="admin-input" defaultValue="10.00" />
+                <input
+                  className="admin-input"
+                  value={draft.pricing.minimumBookingAmount}
+                  onChange={(event) => updateSection("pricing", "minimumBookingAmount", Number(event.target.value))}
+                />
               </div>
               <div className="admin-form-field">
                 <label className="admin-field-label">Night surcharge</label>
-                <input className="admin-input" defaultValue="15%" />
+                <input
+                  className="admin-input"
+                  value={draft.pricing.nightSurcharge}
+                  onChange={(event) => updateSection("pricing", "nightSurcharge", Number(event.target.value))}
+                />
               </div>
             </div>
           </div>
@@ -64,22 +223,22 @@ function SettingsPage() {
             </div>
 
             <div className="admin-toggle-list">
-              <button type="button" className="admin-toggle-row" onClick={() => setEmailEnabled((value) => !value)}>
+              <button type="button" className="admin-toggle-row" onClick={() => updateSection("notifications", "emailEnabled", !draft.notifications.emailEnabled)}>
                 <div>
                   <strong>Email notifications</strong>
                   <span>Send driver and admin alerts after booking confirmation.</span>
                 </div>
-                <span className={emailEnabled ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
+                <span className={draft.notifications.emailEnabled ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
                   <span />
                 </span>
               </button>
 
-              <button type="button" className="admin-toggle-row" onClick={() => setSmsEnabled((value) => !value)}>
+              <button type="button" className="admin-toggle-row" onClick={() => updateSection("notifications", "smsEnabled", !draft.notifications.smsEnabled)}>
                 <div>
                   <strong>SMS notifications</strong>
                   <span>Prepared for future Twilio integration once enabled.</span>
                 </div>
-                <span className={smsEnabled ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
+                <span className={draft.notifications.smsEnabled ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
                   <span />
                 </span>
               </button>
@@ -87,13 +246,13 @@ function SettingsPage() {
               <button
                 type="button"
                 className="admin-toggle-row"
-                onClick={() => setAutomaticAssignment((value) => !value)}
+                onClick={() => updateSection("notifications", "automaticAssignment", !draft.notifications.automaticAssignment)}
               >
                 <div>
                   <strong>Automatic assignment</strong>
                   <span>Allow the future backend to auto-assign bookings to available drivers.</span>
                 </div>
-                <span className={automaticAssignment ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
+                <span className={draft.notifications.automaticAssignment ? "admin-toggle admin-toggle-on" : "admin-toggle"}>
                   <span />
                 </span>
               </button>
@@ -111,15 +270,19 @@ function SettingsPage() {
             <div className="admin-form-grid">
               <div className="admin-form-field admin-form-field-full">
                 <label className="admin-field-label">Stripe publishable key</label>
-                <input className="admin-input" defaultValue="pk_test_xxxxxxxxxxxxxxxxxxxxxx" />
+                <input
+                  className="admin-input"
+                  value={draft.stripe.publishableKey}
+                  onChange={(event) => updateSection("stripe", "publishableKey", event.target.value)}
+                />
               </div>
               <div className="admin-form-field admin-form-field-full">
                 <label className="admin-field-label">Email sender address</label>
-                <input className="admin-input" defaultValue="noreply@ryda.local" />
+                <input className="admin-input" value={draft.email.fromEmail} onChange={(event) => updateSection("email", "fromEmail", event.target.value)} />
               </div>
               <div className="admin-form-field admin-form-field-full">
                 <label className="admin-field-label">Google Maps API key</label>
-                <input className="admin-input" defaultValue="AIzaSy-example-placeholder" />
+                <input className="admin-input" value={draft.maps.apiKey} onChange={(event) => updateSection("maps", "apiKey", event.target.value)} />
               </div>
             </div>
           </div>
@@ -137,19 +300,19 @@ function SettingsPage() {
             <div className="admin-summary-list">
               <div className="admin-summary-row">
                 <span>Email alerts</span>
-                <strong>{emailEnabled ? "Enabled" : "Disabled"}</strong>
+                <strong>{draft.notifications.emailEnabled ? "Enabled" : "Disabled"}</strong>
               </div>
               <div className="admin-summary-row">
                 <span>SMS alerts</span>
-                <strong>{smsEnabled ? "Enabled" : "Disabled"}</strong>
+                <strong>{draft.notifications.smsEnabled ? "Enabled" : "Disabled"}</strong>
               </div>
               <div className="admin-summary-row">
                 <span>Auto assignment</span>
-                <strong>{automaticAssignment ? "Enabled" : "Disabled"}</strong>
+                <strong>{draft.notifications.automaticAssignment ? "Enabled" : "Disabled"}</strong>
               </div>
               <div className="admin-summary-row">
                 <span>Environment</span>
-                <strong>Local UI mock</strong>
+                <strong>{canSave ? "Live backend" : "Read only"}</strong>
               </div>
             </div>
           </div>
@@ -165,15 +328,15 @@ function SettingsPage() {
             <div className="admin-reminder-list">
               <div className="admin-reminder-item">
                 <span className="admin-reminder-dot" />
-                <span>Pricing values are currently visual only and ready for future backend configuration sync.</span>
+                <span>Pricing values now load from and save to the backend settings service.</span>
               </div>
               <div className="admin-reminder-item">
                 <span className="admin-reminder-dot" />
-                <span>Notification toggles already present clear active and inactive states for later API wiring.</span>
+                <span>Notification toggles are stored as shared settings for the admin panel configuration.</span>
               </div>
               <div className="admin-reminder-item">
                 <span className="admin-reminder-dot" />
-                <span>System key inputs are styled for production-like settings management without storing secrets.</span>
+                <span>{canSave ? "Super admin can persist these changes immediately." : "Only super admin can save settings changes."}</span>
               </div>
             </div>
           </div>

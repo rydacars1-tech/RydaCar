@@ -2187,6 +2187,29 @@ a {
   font-weight: 600;
 }
 
+.admin-sidebar-user {
+  margin-bottom: 0.9rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: #162033;
+}
+
+.admin-sidebar-user strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.admin-sidebar-user span {
+  font-size: 0.78rem;
+  color: #64748b;
+  text-transform: capitalize;
+}
+
 .admin-status-dot {
   width: 10px;
   height: 10px;
@@ -2286,6 +2309,77 @@ a {
   line-height: 1.05;
   font-weight: 800;
   letter-spacing: -0.03em;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top, rgba(54, 109, 255, 0.22), transparent 32%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+}
+
+.auth-page-loading {
+  color: #162033;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  padding: 1.5rem;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.95rem;
+  margin-bottom: 1.5rem;
+}
+
+.auth-brand-logo {
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+.auth-brand-title {
+  color: #162033;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.auth-brand-subtitle {
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.auth-head {
+  margin-bottom: 1.2rem;
+}
+
+.auth-title {
+  margin: 0 0 0.45rem;
+  color: #162033;
+  font-size: 1.7rem;
+  line-height: 1.1;
+}
+
+.auth-copy {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.96rem;
+  line-height: 1.55;
 }
 
 .admin-page-subtitle {

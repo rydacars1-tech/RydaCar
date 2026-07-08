@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
-import { formatDateRangeLabel, getAdminSnapshot, getCurrentMonthDateRange, navigateTo } from "./admin/adminData.js";
+import { buildAdminSnapshotFromCollections, formatDateRangeLabel, getCurrentMonthDateRange, navigateTo } from "./admin/adminData.js";
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 
 function MetricCard({ label, value, hint, icon, tone = "default", onClick }) {
   return (
@@ -218,20 +219,60 @@ function TrendAnalyticsCard({ items }) {
 }
 
 function DashboardPage() {
-  const [refreshKey, setRefreshKey] = useState(0);
+  const { authenticatedRequest } = useAdminAuth();
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
   const [loading, setLoading] = useState(false);
+  const [apiData, setApiData] = useState({ bookings: [], taxis: [] });
+  const [loadError, setLoadError] = useState("");
   const timerRef = useRef(null);
 
   useEffect(() => {
-    const id = setInterval(() => setRefreshKey((key) => key + 1), 2500);
-    return () => clearInterval(id);
-  }, []);
+    let active = true;
+
+    async function loadDashboardData() {
+      setLoading(true);
+      setLoadError("");
+
+      try {
+        const [bookingsPayload, qrPayload] = await Promise.all([
+          authenticatedRequest("/dashboard/reports/bookings", { method: "GET" }),
+          authenticatedRequest("/qr", { method: "GET" })
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        setApiData({
+          bookings: bookingsPayload.data || [],
+          taxis: (qrPayload.data || []).map((item) => ({
+            id: item.id,
+            createdAt: item.createdAt,
+            status: item.status
+          }))
+        });
+      } catch (error) {
+        if (active) {
+          setLoadError(error?.message || "Unable to load dashboard data.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboardData();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
-  const allSnapshot = useMemo(() => getAdminSnapshot(), [refreshKey]);
-  const snapshot = useMemo(() => getAdminSnapshot({ range }), [refreshKey, range]);
+  const allSnapshot = useMemo(() => buildAdminSnapshotFromCollections(apiData), [apiData]);
+  const snapshot = useMemo(() => buildAdminSnapshotFromCollections({ ...apiData, range }), [apiData, range]);
   const completionRate = snapshot.totals.bookings
     ? `${Math.round((snapshot.totals.done / snapshot.totals.bookings) * 100)}%`
     : "0%";
@@ -320,6 +361,7 @@ function DashboardPage() {
             </div>
           ) : (
             <>
+              {loadError ? <div className="admin-inline-feedback">{loadError}</div> : null}
               <div className="admin-metrics-grid">
                 {metricCards.map((card) => (
                   <MetricCard key={card.label} {...card} />

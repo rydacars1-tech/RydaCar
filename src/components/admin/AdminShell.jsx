@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import logo from "../../assets/logo.jpeg";
+import { useAdminAuth } from "../../context/AdminAuthContext.jsx";
 import { getAdminNavigation, navigateTo } from "./adminData.js";
 
 function AdminIcon({ icon }) {
@@ -135,6 +136,7 @@ function AdminShell({
   children
 }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const { logout, user } = useAdminAuth();
   const navigation = useMemo(() => getAdminNavigation(openBookingsCount), [openBookingsCount]);
 
   function handleNavigate(item) {
@@ -144,9 +146,10 @@ function AdminShell({
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     setMobileNavOpen(false);
-    navigateTo("#/");
+    await logout();
+    navigateTo("#/dashboard");
   }
 
   return (
@@ -169,6 +172,12 @@ function AdminShell({
         </nav>
 
         <div className="admin-sidebar-footer">
+          {user ? (
+            <div className="admin-sidebar-user">
+              <strong>{user.name}</strong>
+              <span>{user.role.replace("_", " ")}</span>
+            </div>
+          ) : null}
           <button type="button" className="admin-sidebar-logout" onClick={handleLogout}>
             <span className="admin-sidebar-logout-icon">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -241,6 +250,12 @@ function AdminShell({
             </nav>
 
             <div className="admin-sidebar-footer">
+              {user ? (
+                <div className="admin-sidebar-user">
+                  <strong>{user.name}</strong>
+                  <span>{user.role.replace("_", " ")}</span>
+                </div>
+              ) : null}
               <button type="button" className="admin-sidebar-logout" onClick={handleLogout}>
                 <span className="admin-sidebar-logout-icon">
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">

@@ -18,7 +18,7 @@ export function writeJsonArray(key, value) {
 }
 
 export function normalizeBookingStatus(booking) {
-  return booking?.status === "done" ? "done" : "open";
+  return ["done", "completed"].includes(String(booking?.status || "").toLowerCase()) ? "done" : "open";
 }
 
 export function formatDateTime(value) {
@@ -300,6 +300,35 @@ export function getAdminSnapshot(options = {}) {
     latestBooking: bookings[0] || null,
     monthlyBookings: range ? buildDateCountSeries(bookings, range, getBookingDateValue) : getRecentMonthSeries(bookings),
     recentBookings: bookings.slice(0, 6)
+  };
+}
+
+export function buildAdminSnapshotFromCollections({ bookings = [], taxis = [], range = null } = {}) {
+  const filteredTaxis = filterItemsByDateRange(taxis, range, getTaxiDateValue);
+  const filteredBookings = filterItemsByDateRange(bookings, range, getBookingDateValue);
+  const openBookings = filteredBookings.filter((booking) => normalizeBookingStatus(booking) === "open");
+  const doneBookings = filteredBookings.filter((booking) => normalizeBookingStatus(booking) === "done");
+  const revenue = doneBookings.reduce((total, booking) => {
+    const numeric = Number(booking?.fare ?? booking?.price ?? 0);
+    return Number.isFinite(numeric) ? total + numeric : total;
+  }, 0);
+
+  return {
+    taxis: filteredTaxis,
+    bookings: filteredBookings,
+    openBookings,
+    doneBookings,
+    totals: {
+      taxis: filteredTaxis.length,
+      bookings: filteredBookings.length,
+      open: openBookings.length,
+      done: doneBookings.length,
+      revenue
+    },
+    latestTaxi: filteredTaxis[0] || null,
+    latestBooking: filteredBookings[0] || null,
+    monthlyBookings: range ? buildDateCountSeries(filteredBookings, range, getBookingDateValue) : getRecentMonthSeries(filteredBookings),
+    recentBookings: filteredBookings.slice(0, 6)
   };
 }
 

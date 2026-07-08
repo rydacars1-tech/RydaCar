@@ -1,79 +1,77 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
-import { getAdminSnapshot, readJsonArray, writeJsonArray } from "./admin/adminData.js";
-
-const USERS_STORAGE_KEY = "ryda.admin.users.v1";
-
-const DEFAULT_USERS = [
-  {
-    id: "drv-1",
-    role: "Driver",
-    name: "Adeel Khan",
-    phone: "+92 300 5556677",
-    email: "adeel.driver@ryda.local",
-    status: "Active",
-    vehicle: "TX-1024",
-    lastSeen: "2 min ago"
-  },
-  {
-    id: "drv-2",
-    role: "Driver",
-    name: "Hamza Ali",
-    phone: "+92 321 4402244",
-    email: "hamza.driver@ryda.local",
-    status: "Active",
-    vehicle: "TX-3310",
-    lastSeen: "18 min ago"
-  },
-  {
-    id: "drv-3",
-    role: "Driver",
-    name: "Bilal Ahmed",
-    phone: "+92 333 8877665",
-    email: "bilal.driver@ryda.local",
-    status: "Pending",
-    vehicle: "Unassigned",
-    lastSeen: "Awaiting setup"
-  },
-  {
-    id: "adm-1",
-    role: "Sub Admin",
-    name: "Sarah Noor",
-    phone: "+92 302 4112233",
-    email: "sarah.admin@ryda.local",
-    status: "Active",
-    vehicle: "Admin access",
-    lastSeen: "Online now"
-  },
-  {
-    id: "adm-2",
-    role: "Sub Admin",
-    name: "Muneeb Hassan",
-    phone: "+92 345 9090909",
-    email: "muneeb.admin@ryda.local",
-    status: "Inactive",
-    vehicle: "Admin access",
-    lastSeen: "3 days ago"
-  }
-];
-
-function readUsers() {
-  const stored = readJsonArray(USERS_STORAGE_KEY);
-  return stored.length > 0 ? stored : DEFAULT_USERS;
-}
+import { formatDateTime } from "./admin/adminData.js";
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function UserManagementPage() {
-  const [users, setUsers] = useState(() => readUsers());
+  const { authenticatedRequest, user: sessionUser } = useAdminAuth();
+  const [users, setUsers] = useState([]);
   const [searchValue, setSearchValue] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [formValues, setFormValues] = useState({ name: "", email: "", password: "" });
   const [errors, setErrors] = useState({});
+  const [openBookingsCount, setOpenBookingsCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadUsers() {
+      setFeedback("");
+
+      try {
+        const [driversPayload, adminsPayload, statsPayload] = await Promise.all([
+          authenticatedRequest("/users/drivers", { method: "GET" }),
+          authenticatedRequest("/auth/admin-users", { method: "GET" }),
+          authenticatedRequest("/dashboard/admin", { method: "GET" })
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        const mappedDrivers = (driversPayload.data?.items || []).map((driver) => ({
+          id: driver.id,
+          role: "Driver",
+          name: driver.name,
+          phone: driver.phone || "",
+          email: driver.email,
+          status: driver.status === "active" ? "Active" : "Inactive",
+          vehicle: driver.vehicleNumber || "Unassigned",
+          lastSeen: driver.createdAt ? formatDateTime(driver.createdAt) : "Recently added"
+        }));
+
+        const mappedAdmins = (adminsPayload.data || []).map((adminUser) => ({
+          id: adminUser.id,
+          role: adminUser.role === "super_admin" ? "Super Admin" : "Sub Admin",
+          name: adminUser.name,
+          phone: adminUser.phone || "",
+          email: adminUser.email,
+          status: adminUser.status === "active" ? "Active" : "Inactive",
+          vehicle: "Admin access",
+          lastSeen: adminUser.createdAt ? formatDateTime(adminUser.createdAt) : "Recently added"
+        }));
+
+        setUsers([...mappedAdmins, ...mappedDrivers]);
+        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
+      } catch (error) {
+        if (active) {
+          setFeedback(error?.message || "Unable to load users.");
+        }
+      }
+    }
+
+    loadUsers();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -94,8 +92,6 @@ function UserManagementPage() {
     const active = users.filter((user) => user.status === "Active").length;
     return { drivers, subAdmins, active };
   }, [users]);
-  const snapshot = useMemo(() => getAdminSnapshot(), []);
-
   function resetForm() {
     setFormValues({ name: "", email: "", password: "" });
     setErrors({});
@@ -131,12 +127,7 @@ function UserManagementPage() {
     return Object.keys(nextErrors).length === 0;
   }
 
-  function nextSubAdminId() {
-    const count = users.filter((user) => user.role === "Sub Admin").length + 1;
-    return `adm-${Date.now()}-${count}`;
-  }
-
-  function handleCreateSubAdmin(event) {
+  async function handleCreateSubAdmin(event) {
     event.preventDefault();
     setFeedback("");
 
@@ -146,37 +137,49 @@ function UserManagementPage() {
 
     setSubmitting(true);
 
-    window.setTimeout(() => {
-      const email = formValues.email.trim().toLowerCase();
+    try {
+      const payload = await authenticatedRequest("/auth/sub-admins", {
+        method: "POST",
+        body: JSON.stringify({
+          name: formValues.name.trim(),
+          email: formValues.email.trim(),
+          password: formValues.password,
+          phone: ""
+        })
+      });
+
       const nextUser = {
-        id: nextSubAdminId(),
+        id: payload.data.id,
         role: "Sub Admin",
-        name: formValues.name.trim(),
-        phone: "Not assigned",
-        email,
-        status: "Active",
+        name: payload.data.name,
+        phone: payload.data.phone || "",
+        email: payload.data.email,
+        status: payload.data.status === "active" ? "Active" : "Inactive",
         vehicle: "Admin access",
-        lastSeen: "Just created"
+        lastSeen: payload.data.createdAt ? formatDateTime(payload.data.createdAt) : "Just created"
       };
 
-      const nextUsers = [nextUser, ...users];
-      setUsers(nextUsers);
-      writeJsonArray(USERS_STORAGE_KEY, nextUsers);
-      setSubmitting(false);
+      setUsers((current) => [nextUser, ...current]);
       setFeedback("Sub admin created successfully.");
       closeModal();
-    }, 350);
+    } catch (error) {
+      setFeedback(error?.message || "Unable to create sub admin.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <AdminShell
       activeNav="users"
-      openBookingsCount={snapshot.totals.open}
+      openBookingsCount={openBookingsCount}
       title="User Management"
       actions={
-        <button type="button" className="admin-primary-button" onClick={() => setCreateModalOpen(true)}>
-          Add Sub Admin
-        </button>
+        sessionUser?.role === "super_admin" ? (
+          <button type="button" className="admin-primary-button" onClick={() => setCreateModalOpen(true)}>
+            Add Sub Admin
+          </button>
+        ) : null
       }
     >
       <section className="admin-panel-card">
@@ -261,7 +264,7 @@ function UserManagementPage() {
         )}
       </section>
 
-      {createModalOpen ? (
+      {createModalOpen && sessionUser?.role === "super_admin" ? (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal">
             <button type="button" className="modal-close" onClick={closeModal} aria-label="Close">

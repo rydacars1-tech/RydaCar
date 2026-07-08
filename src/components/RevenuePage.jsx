@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
-import { buildDateBuckets, formatCurrency, formatDateRangeLabel, getAdminSnapshot, getCurrentMonthDateRange } from "./admin/adminData.js";
+import { buildAdminSnapshotFromCollections, buildDateBuckets, formatCurrency, formatDateRangeLabel, getCurrentMonthDateRange } from "./admin/adminData.js";
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 
 function buildSmoothPath(points) {
   if (points.length === 0) {
@@ -236,20 +237,47 @@ function RevenueTrendCard({ items }) {
 }
 
 function RevenuePage() {
-  const [refreshKey, setRefreshKey] = useState(0);
+  const { authenticatedRequest } = useAdminAuth();
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
   const [loading, setLoading] = useState(false);
+  const [bookings, setBookings] = useState([]);
+  const [loadError, setLoadError] = useState("");
   const timerRef = useRef(null);
-  const allSnapshot = useMemo(() => getAdminSnapshot(), [refreshKey]);
-  const snapshot = useMemo(() => getAdminSnapshot({ range }), [refreshKey, range]);
+  const allSnapshot = useMemo(() => buildAdminSnapshotFromCollections({ bookings }), [bookings]);
+  const snapshot = useMemo(() => buildAdminSnapshotFromCollections({ bookings, range }), [bookings, range]);
   const revenueSeries = useMemo(() => getRevenueSeries(snapshot.doneBookings, range), [snapshot.doneBookings, range]);
   const bestMonth = revenueSeries.reduce((best, item) => (item.amount > best.amount ? item : best), revenueSeries[0] || { label: "-", amount: 0 });
   const avgRevenue = revenueSeries.length ? snapshot.totals.revenue / revenueSeries.length : 0;
 
   useEffect(() => {
-    const id = setInterval(() => setRefreshKey((key) => key + 1), 2500);
-    return () => clearInterval(id);
-  }, []);
+    let active = true;
+
+    async function loadRevenueData() {
+      setLoading(true);
+      setLoadError("");
+
+      try {
+        const payload = await authenticatedRequest("/dashboard/reports/bookings", { method: "GET" });
+        if (active) {
+          setBookings(payload.data || []);
+        }
+      } catch (error) {
+        if (active) {
+          setLoadError(error?.message || "Unable to load revenue data.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadRevenueData();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
@@ -277,6 +305,7 @@ function RevenuePage() {
             </div>
           ) : (
             <>
+              {loadError ? <div className="admin-inline-feedback">{loadError}</div> : null}
               <div className="admin-metrics-grid admin-metrics-grid-three">
                 <div className="admin-metric-card admin-metric-card-dark">
                   <div className="admin-metric-top">

@@ -2,17 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
 import {
-  BOOKINGS_STORAGE_KEY,
   filterItemsByDateRange,
   formatDateRangeLabel,
   formatDateTime,
   getBookingDateValue,
   getCurrentMonthDateRange,
-  navigateTo,
-  normalizeBookingStatus,
-  readJsonArray,
-  writeJsonArray
+  navigateTo
 } from "./admin/adminData.js";
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 
 function CopyIcon() {
   return (
@@ -24,51 +21,89 @@ function CopyIcon() {
 }
 
 function OperatorPage({ initialTab = "bookings" }) {
-  const [refreshKey, setRefreshKey] = useState(0);
+  const { authenticatedRequest } = useAdminAuth();
   const [tab, setTab] = useState(initialTab);
   const [copiedPhoneKey, setCopiedPhoneKey] = useState("");
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
   const [loading, setLoading] = useState(false);
+  const [allBookings, setAllBookings] = useState([]);
+  const [actionError, setActionError] = useState("");
   const timerRef = useRef(null);
-  const allBookings = useMemo(() => readJsonArray(BOOKINGS_STORAGE_KEY), [refreshKey]);
 
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
 
   useEffect(() => {
-    const id = setInterval(() => setRefreshKey((k) => k + 1), 2500);
-    return () => clearInterval(id);
-  }, []);
+    let active = true;
+
+    async function loadBookings() {
+      setLoading(true);
+      setActionError("");
+
+      try {
+        const payload = await authenticatedRequest("/bookings", { method: "GET" });
+        if (!active) {
+          return;
+        }
+
+        setAllBookings(payload.data?.items || []);
+      } catch (error) {
+        if (active) {
+          setActionError(error?.message || "Unable to load bookings.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadBookings();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
-  const openBookings = useMemo(
-    () => allBookings.filter((b) => normalizeBookingStatus(b) === "open"),
-    [allBookings]
-  );
-  const doneBookings = useMemo(
-    () => allBookings.filter((b) => normalizeBookingStatus(b) === "done"),
-    [allBookings]
-  );
+  const openBookings = useMemo(() => {
+    return allBookings.filter((booking) => !["completed", "cancelled"].includes(String(booking.status || "").toLowerCase()));
+  }, [allBookings]);
+  const doneBookings = useMemo(() => {
+    return allBookings.filter((booking) => String(booking.status || "").toLowerCase() === "completed");
+  }, [allBookings]);
 
   const filteredOpenBookings = useMemo(() => filterItemsByDateRange(openBookings, range, getBookingDateValue), [openBookings, range]);
   const filteredDoneBookings = useMemo(() => filterItemsByDateRange(doneBookings, range, getBookingDateValue), [doneBookings, range]);
   const shown = tab === "history" ? filteredDoneBookings : filteredOpenBookings;
   const openCount = openBookings.length;
 
-  function markDone(bookingId) {
-    const next = allBookings.map((b) => {
-      if (b.id !== bookingId) return b;
-      return { ...b, status: "done", doneAt: new Date().toISOString() };
-    });
-    writeJsonArray(BOOKINGS_STORAGE_KEY, next);
-    setRefreshKey((k) => k + 1);
+  async function reloadBookings() {
+    const payload = await authenticatedRequest("/bookings", { method: "GET" });
+    setAllBookings(payload.data?.items || []);
   }
 
-  function clearBookings() {
-    writeJsonArray(BOOKINGS_STORAGE_KEY, []);
-    setRefreshKey((k) => k + 1);
+  async function markDone(bookingId) {
+    try {
+      await authenticatedRequest(`/bookings/${bookingId}/complete`, {
+        method: "PATCH",
+        body: JSON.stringify({ paymentStatus: "paid" })
+      });
+      await reloadBookings();
+    } catch (error) {
+      setActionError(error?.message || "Unable to complete this booking.");
+    }
+  }
+
+  async function clearBookings() {
+    try {
+      await authenticatedRequest("/bookings", { method: "DELETE" });
+      setAllBookings([]);
+    } catch (error) {
+      setActionError(error?.message || "Unable to clear bookings.");
+    }
   }
 
   async function copyPhoneNumber(phone, key, event) {
@@ -91,7 +126,7 @@ function OperatorPage({ initialTab = "bookings" }) {
     window.clearTimeout(timerRef.current);
     setLoading(true);
     setRange(nextRange);
-    timerRef.current = window.setTimeout(() => setLoading(false), 220);
+    timerRef.current = window.setTimeout(() => setLoading(false), 180);
   }
 
   return (
@@ -102,7 +137,7 @@ function OperatorPage({ initialTab = "bookings" }) {
       actions={
         <>
           <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
-          <button type="button" className="admin-ghost-button" onClick={() => setRefreshKey((k) => k + 1)}>
+          <button type="button" className="admin-ghost-button" onClick={reloadBookings}>
             Refresh
           </button>
           <button type="button" className="admin-primary-button" onClick={() => navigateTo("#/qr")}>
@@ -145,6 +180,8 @@ function OperatorPage({ initialTab = "bookings" }) {
           </div>
         </div>
 
+        {actionError ? <div className="admin-inline-feedback">{actionError}</div> : null}
+
         {loading ? (
           <div className="admin-loading-state">Updating bookings for {formatDateRangeLabel(range)}...</div>
         ) : shown.length === 0 ? (
@@ -177,9 +214,9 @@ function OperatorPage({ initialTab = "bookings" }) {
                       <div className="admin-booking-count">{index + 1}</div>
                     </td>
                     <td>
-                      <div className="admin-table-title">{booking.customerName}</div>
+                      <div className="admin-table-title">{booking.customerName || "-"}</div>
                       <div className="admin-phone-row">
-                        <span className="admin-table-subtitle">{booking.customerPhone}</span>
+                        <span className="admin-table-subtitle">{booking.customerPhone || "-"}</span>
                         <button
                           type="button"
                           className="admin-copy-icon-button"
@@ -193,9 +230,9 @@ function OperatorPage({ initialTab = "bookings" }) {
                       </div>
                     </td>
                     <td>
-                      <div className="admin-table-title">{booking.driverName}</div>
+                      <div className="admin-table-title">{booking.driverName || "Unassigned"}</div>
                       <div className="admin-phone-row">
-                        <span className="admin-table-subtitle">{booking.driverPhone}</span>
+                        <span className="admin-table-subtitle">{booking.driverPhone || "No phone"}</span>
                         <button
                           type="button"
                           className="admin-copy-icon-button"
@@ -209,16 +246,16 @@ function OperatorPage({ initialTab = "bookings" }) {
                       </div>
                     </td>
                     <td>
-                      <div className="admin-route-inline" title={`${booking.pickup} -> ${booking.dropoff}`}>
+                      <div className="admin-route-inline" title={`${booking.pickup} -> ${booking.destination}`}>
                         <span className="admin-route-inline-text">{booking.pickup}</span>
                         <span className="admin-route-inline-arrow" aria-hidden="true">
                           →
                         </span>
-                        <span className="admin-route-inline-text">{booking.dropoff}</span>
+                        <span className="admin-route-inline-text">{booking.destination}</span>
                       </div>
                     </td>
                     <td>
-                      <div className="admin-table-title">{booking.bookingDate}</div>
+                      <div className="admin-table-title">{booking.bookingDate || "-"}</div>
                       <div className="admin-table-subtitle">{formatDateTime(booking.createdAt)}</div>
                     </td>
                     <td>

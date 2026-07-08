@@ -1,27 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import logo from "../assets/logo.jpeg";
-
-const TAXIS_STORAGE_KEY = "ryda.taxis.v1";
-const BOOKINGS_STORAGE_KEY = "ryda.bookings.v1";
-
-function readJsonArray(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeJsonArray(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function createId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+import { publicGet, publicPost } from "../lib/api.js";
+import { formatCurrency } from "./admin/adminData.js";
 
 function todayValue() {
   const d = new Date();
@@ -41,26 +21,75 @@ function formatNow(d) {
   });
 }
 
-function BookingPage({ taxiId }) {
+function BookingPage({ taxiId, token }) {
   const [now, setNow] = useState(() => new Date());
+  const [taxi, setTaxi] = useState(null);
+  const [loadingTaxi, setLoadingTaxi] = useState(true);
+  const [pricing, setPricing] = useState(null);
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  const taxi = useMemo(() => {
-    const taxis = readJsonArray(TAXIS_STORAGE_KEY);
-    return taxis.find((t) => t.id === taxiId) || null;
-  }, [taxiId]);
+  useEffect(() => {
+    let active = true;
+
+    async function loadTaxi() {
+      if (!taxiId && !token) {
+        if (active) {
+          setTaxi(null);
+          setLoadingTaxi(false);
+          setPageError("Invalid QR code. Taxi is missing.");
+        }
+        return;
+      }
+
+      setLoadingTaxi(true);
+      setPageError("");
+
+      try {
+        const payload = token
+          ? await publicGet(`/qr/scan/${encodeURIComponent(token)}`)
+          : await publicGet(`/qr/public/${encodeURIComponent(taxiId)}`);
+
+        if (!active) {
+          return;
+        }
+
+        if (!payload.data?.isActive) {
+          setTaxi(null);
+          setPageError("This taxi QR code is inactive.");
+          return;
+        }
+
+        setTaxi(payload.data);
+      } catch (error) {
+        if (active) {
+          setTaxi(null);
+          setPageError(error?.message || "Unable to load this taxi QR code.");
+        }
+      } finally {
+        if (active) {
+          setLoadingTaxi(false);
+        }
+      }
+    }
+
+    loadTaxi();
+
+    return () => {
+      active = false;
+    };
+  }, [taxiId, token]);
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
   const [bookingDate, setBookingDate] = useState(() => todayValue());
-  const [km] = useState("");
-  const [price] = useState("");
 
   const [errors, setErrors] = useState({});
   const [modalOpen, setModalOpen] = useState(false);
@@ -68,9 +97,46 @@ function BookingPage({ taxiId }) {
   const [depositIntent, setDepositIntent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (!pickup.trim() || !dropoff.trim()) {
+      setPricing(null);
+      setPricingLoading(false);
+      return;
+    }
+
+    let active = true;
+    const timerId = window.setTimeout(async () => {
+      setPricingLoading(true);
+
+      try {
+        const payload = await publicPost("/pricing/estimate", {
+          pickup: pickup.trim(),
+          destination: dropoff.trim()
+        });
+
+        if (active) {
+          setPricing(payload.data);
+        }
+      } catch {
+        if (active) {
+          setPricing(null);
+        }
+      } finally {
+        if (active) {
+          setPricingLoading(false);
+        }
+      }
+    }, 280);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timerId);
+    };
+  }, [dropoff, pickup]);
+
   function validate() {
     const nextErrors = {};
-    if (!taxiId) nextErrors.taxi = "Invalid QR code. Taxi is missing.";
+    if (!taxiId && !token) nextErrors.taxi = "Invalid QR code. Taxi is missing.";
     if (!taxi) nextErrors.taxi = "This taxi QR code is not recognized.";
     if (!customerName.trim()) nextErrors.customerName = "Your name is required";
     if (!customerPhone.trim()) nextErrors.customerPhone = "Your phone is required";
@@ -81,42 +147,64 @@ function BookingPage({ taxiId }) {
     return Object.keys(nextErrors).length === 0;
   }
 
-  function submitBooking(event) {
+  async function submitBooking(event) {
     event.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setPageError("");
     if (!validate()) {
       setIsSubmitting(false);
       return;
     }
 
-    const booking = {
-      id: createId(),
-      taxiId,
-      taxiNumber: taxi.taxiNumber,
-      taxiName: taxi.taxiName || "",
-      driverName: taxi.driverName,
-      driverPhone: taxi.driverPhone,
-      customerName: customerName.trim(),
-      customerPhone: customerPhone.trim(),
-      pickup: pickup.trim(),
-      dropoff: dropoff.trim(),
-      bookingDate,
-      km,
-      price,
-      status: "open",
-      createdAt: new Date().toISOString()
-    };
+    try {
+      const nextPricing =
+        pricing ||
+        (
+          await publicPost("/pricing/estimate", {
+            pickup: pickup.trim(),
+            destination: dropoff.trim()
+          })
+        ).data;
 
-    const existing = readJsonArray(BOOKINGS_STORAGE_KEY);
-    const next = [booking, ...existing];
-    writeJsonArray(BOOKINGS_STORAGE_KEY, next);
+      setPricing(nextPricing);
 
-    setSubmittedBookingId(booking.id);
-    setDepositIntent(false);
-    setModalOpen(true);
-    setTimeout(() => setIsSubmitting(false), 650);
+      const bookingPayload = await publicPost("/bookings/customer", {
+        customer: {
+          name: customerName.trim(),
+          phone: customerPhone.trim()
+        },
+        trip: {
+          pickup: pickup.trim(),
+          destination: dropoff.trim(),
+          bookingDate
+        },
+        pricing: nextPricing,
+        qrId: taxi.qrId || taxi.id || null,
+        assignedDriverId: taxi.driverId || null,
+        taxi: {
+          label: taxi.label || taxi.taxiName || taxi.vehicleNumber || "",
+          taxiName: taxi.taxiName || taxi.label || "",
+          vehicleNumber: taxi.vehicleNumber || ""
+        },
+        driver: {
+          name: taxi.driverName || "",
+          phone: taxi.driverPhone || ""
+        }
+      });
+
+      setSubmittedBookingId(bookingPayload.data.bookingNumber || bookingPayload.data.id || "");
+      setDepositIntent(false);
+      setModalOpen(true);
+    } catch (error) {
+      setPageError(error?.message || "Unable to submit booking right now.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
+
+  const km = pricing ? `${Number(pricing.distanceKm || 0).toFixed(1)} km` : pricingLoading ? "Calculating..." : "";
+  const price = pricing ? formatCurrency(pricing.totalFare) : pricingLoading ? "Calculating..." : "";
 
   return (
     <div className="page page-book">
@@ -133,16 +221,27 @@ function BookingPage({ taxiId }) {
         <div className="page-card">
           <h1 className="page-title">Book your taxi</h1>
 
-          {errors.taxi && <div className="page-alert">{errors.taxi}</div>}
+          {pageError || errors.taxi ? <div className="page-alert">{pageError || errors.taxi}</div> : null}
+
+          <div className="form-two">
+            <div className="form-field">
+              <label className="form-label">Taxi</label>
+              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.vehicleNumber || ""} disabled />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Taxi name</label>
+              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.taxiName || taxi?.label || ""} disabled />
+            </div>
+          </div>
 
           <div className="form-two">
             <div className="form-field">
               <label className="form-label">Driver name</label>
-              <input className="form-input" value={taxi?.driverName || ""} disabled />
+              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.driverName || "Not assigned"} disabled />
             </div>
             <div className="form-field">
               <label className="form-label">Driver phone</label>
-              <input className="form-input" value={taxi?.driverPhone || ""} disabled />
+              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.driverPhone || "Not assigned"} disabled />
             </div>
           </div>
 
@@ -223,7 +322,7 @@ function BookingPage({ taxiId }) {
             <button
               type="submit"
               className="form-primary"
-              disabled={!taxiId || !taxi || isSubmitting}
+              disabled={(!taxiId && !token) || !taxi || isSubmitting || loadingTaxi}
               aria-busy={isSubmitting}
             >
               {isSubmitting ? (

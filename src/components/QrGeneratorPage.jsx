@@ -1,27 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import * as QRCode from "qrcode";
 import AdminShell from "./admin/AdminShell.jsx";
-import { BOOKINGS_STORAGE_KEY, TAXIS_STORAGE_KEY, createId, readJsonArray, writeJsonArray } from "./admin/adminData.js";
-
-function readTaxis() {
-  return readJsonArray(TAXIS_STORAGE_KEY);
-}
+import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 
 function normalizeTaxiNumber(value) {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-function buildTaxiBookingUrl(taxiId) {
+function buildTaxiBookingUrl(token) {
   const base = window.location.origin;
-  return `${base}/#/book?taxi=${encodeURIComponent(taxiId)}`;
-}
-
-function readBookings() {
-  return readJsonArray(BOOKINGS_STORAGE_KEY);
-}
-
-function getOpenBookingsCount() {
-  return readBookings().filter((booking) => (booking?.status || "open") === "open").length;
+  return `${base}/#/book?token=${encodeURIComponent(token)}`;
 }
 
 function downloadDataUrl(dataUrl, filename) {
@@ -67,10 +55,11 @@ function TrashIcon() {
 }
 
 function QrGeneratorPage() {
-  const [taxis, setTaxis] = useState(() => readTaxis());
+  const { authenticatedRequest } = useAdminAuth();
+  const [taxis, setTaxis] = useState([]);
   const [expandedTaxiId, setExpandedTaxiId] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [openBookingsCount, setOpenBookingsCount] = useState(() => getOpenBookingsCount());
+  const [openBookingsCount, setOpenBookingsCount] = useState(0);
   const [qrPreviewByTaxiId, setQrPreviewByTaxiId] = useState({});
   const [copyStateByTaxiId, setCopyStateByTaxiId] = useState({});
   const [downloadingTaxiId, setDownloadingTaxiId] = useState("");
@@ -78,6 +67,8 @@ function QrGeneratorPage() {
   const [deletingTaxiId, setDeletingTaxiId] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [actionFeedback, setActionFeedback] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   const expandedTaxi = useMemo(() => taxis.find((taxi) => taxi.id === expandedTaxiId) || null, [taxis, expandedTaxiId]);
 
@@ -88,16 +79,58 @@ function QrGeneratorPage() {
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    const id = setInterval(() => setOpenBookingsCount(getOpenBookingsCount()), 1500);
-    return () => clearInterval(id);
-  }, []);
+    let active = true;
+
+    async function loadData() {
+      setLoading(true);
+
+      try {
+        const [qrPayload, statsPayload] = await Promise.all([
+          authenticatedRequest("/qr", { method: "GET" }),
+          authenticatedRequest("/dashboard/admin", { method: "GET" })
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        setTaxis(
+          (qrPayload.data || []).map((item) => ({
+            id: item.id,
+            token: item.token,
+            taxiNumber: item.vehicleNumber || "",
+            taxiName: item.taxiName || item.label || "",
+            driverName: item.driverName || "",
+            driverPhone: item.driverPhone || "",
+            createdAt: item.createdAt || "",
+            status: item.status || "active"
+          }))
+        );
+        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
+      } catch (error) {
+        if (active) {
+          setActionFeedback(error?.message || "Unable to load QR codes right now.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadData();
+
+    return () => {
+      active = false;
+    };
+  }, [authenticatedRequest]);
 
   useEffect(() => {
     if (!expandedTaxi || qrPreviewByTaxiId[expandedTaxi.id]) {
       return;
     }
 
-    QRCode.toDataURL(buildTaxiBookingUrl(expandedTaxi.id), { width: 720, margin: 2 })
+    QRCode.toDataURL(buildTaxiBookingUrl(expandedTaxi.token), { width: 720, margin: 2 })
       .then((dataUrl) => {
         setQrPreviewByTaxiId((current) => ({ ...current, [expandedTaxi.id]: dataUrl }));
       })
@@ -142,38 +175,51 @@ function QrGeneratorPage() {
   async function handleGenerate(event) {
     event.preventDefault();
     if (!validate()) return;
+    setSubmitting(true);
+    setActionFeedback("");
 
-    const taxiPayload = {
-      taxiNumber: normalizeTaxiNumber(taxiNumber),
-      taxiName: taxiName.trim(),
-      driverName: driverName.trim(),
-      driverPhone: driverPhone.trim()
-    };
+    try {
+      const payload = {
+        taxiName: taxiName.trim(),
+        label: taxiName.trim() || normalizeTaxiNumber(taxiNumber),
+        vehicleNumber: normalizeTaxiNumber(taxiNumber),
+        driverName: driverName.trim(),
+        driverPhone: driverPhone.trim()
+      };
 
-    const nextTaxis = editingTaxiId
-      ? taxis.map((taxi) =>
-          taxi.id === editingTaxiId
-            ? {
-                ...taxi,
-                ...taxiPayload
-              }
-            : taxi
-        )
-      : [
-          {
-            id: createId(),
-            createdAt: new Date().toISOString(),
-            ...taxiPayload
-          },
-          ...taxis
-        ];
+      const response = editingTaxiId
+        ? await authenticatedRequest(`/qr/${editingTaxiId}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload)
+          })
+        : await authenticatedRequest("/qr", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
 
-    setTaxis(nextTaxis);
-    writeJsonArray(TAXIS_STORAGE_KEY, nextTaxis);
-    setExpandedTaxiId(editingTaxiId || nextTaxis[0]?.id || "");
-    setCreateModalOpen(false);
-    setActionFeedback(editingTaxiId ? "Taxi updated successfully." : "Taxi created successfully.");
-    resetForm();
+      const savedTaxi = {
+        id: response.data.id,
+        token: response.data.token,
+        taxiNumber: response.data.vehicleNumber || "",
+        taxiName: response.data.taxiName || response.data.label || "",
+        driverName: response.data.driverName || "",
+        driverPhone: response.data.driverPhone || "",
+        createdAt: response.data.createdAt || new Date().toISOString(),
+        status: response.data.status || "active"
+      };
+
+      setTaxis((current) =>
+        editingTaxiId ? current.map((taxi) => (taxi.id === editingTaxiId ? { ...taxi, ...savedTaxi } : taxi)) : [savedTaxi, ...current]
+      );
+      setExpandedTaxiId(savedTaxi.id);
+      setCreateModalOpen(false);
+      setActionFeedback(editingTaxiId ? "Taxi updated successfully." : "Taxi created successfully.");
+      resetForm();
+    } catch (error) {
+      setActionFeedback(error?.message || "Unable to save this QR code.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function getQrDataUrl(taxiId) {
@@ -182,7 +228,12 @@ function QrGeneratorPage() {
     }
 
     try {
-      const dataUrl = await QRCode.toDataURL(buildTaxiBookingUrl(taxiId), { width: 720, margin: 2 });
+      const selectedTaxi = taxis.find((item) => item.id === taxiId);
+      if (!selectedTaxi?.token) {
+        return "";
+      }
+
+      const dataUrl = await QRCode.toDataURL(buildTaxiBookingUrl(selectedTaxi.token), { width: 720, margin: 2 });
       setQrPreviewByTaxiId((current) => ({ ...current, [taxiId]: dataUrl }));
       return dataUrl;
     } catch {
@@ -191,7 +242,12 @@ function QrGeneratorPage() {
   }
 
   async function handleCopyLink(taxiId) {
-    const bookingUrl = buildTaxiBookingUrl(taxiId);
+    const selectedTaxi = taxis.find((item) => item.id === taxiId);
+    if (!selectedTaxi?.token) {
+      return;
+    }
+
+    const bookingUrl = buildTaxiBookingUrl(selectedTaxi.token);
     setCopyStateByTaxiId((current) => ({ ...current, [taxiId]: "copying" }));
 
     try {
@@ -233,9 +289,12 @@ function QrGeneratorPage() {
     setDeletingTaxiId(deleteCandidate.id);
 
     try {
+      await authenticatedRequest(`/qr/${deleteCandidate.id}`, {
+        method: "DELETE"
+      });
+
       const nextTaxis = taxis.filter((taxi) => taxi.id !== deleteCandidate.id);
       setTaxis(nextTaxis);
-      writeJsonArray(TAXIS_STORAGE_KEY, nextTaxis);
       setQrPreviewByTaxiId((current) => {
         const next = { ...current };
         delete next[deleteCandidate.id];
@@ -251,6 +310,8 @@ function QrGeneratorPage() {
       }
       setActionFeedback("Taxi deleted successfully.");
       setDeleteCandidate(null);
+    } catch (error) {
+      setActionFeedback(error?.message || "Unable to delete this taxi.");
     } finally {
       setDeletingTaxiId("");
     }
@@ -281,11 +342,16 @@ function QrGeneratorPage() {
               <button
                 type="button"
                 className="admin-text-button"
-                onClick={() => {
-                  setTaxis([]);
-                  writeJsonArray(TAXIS_STORAGE_KEY, []);
-                  setExpandedTaxiId("");
-                  setQrPreviewByTaxiId({});
+                onClick={async () => {
+                  try {
+                    await Promise.all(taxis.map((taxi) => authenticatedRequest(`/qr/${taxi.id}`, { method: "DELETE" })));
+                    setTaxis([]);
+                    setExpandedTaxiId("");
+                    setQrPreviewByTaxiId({});
+                    setActionFeedback("All taxis deleted successfully.");
+                  } catch (error) {
+                    setActionFeedback(error?.message || "Unable to clear QR entries.");
+                  }
                 }}
                 disabled={taxis.length === 0}
               >
@@ -296,7 +362,9 @@ function QrGeneratorPage() {
 
           {actionFeedback ? <div className="admin-inline-feedback">{actionFeedback}</div> : null}
 
-          {taxis.length === 0 ? (
+          {loading ? (
+            <div className="admin-loading-state">Loading QR codes...</div>
+          ) : taxis.length === 0 ? (
             <div className="admin-empty-state">
               <div className="admin-empty-state-title">No QR entries created yet</div>
               <div className="admin-empty-state-copy">Start by generating your first taxi QR code for the customer booking flow.</div>
@@ -315,7 +383,7 @@ function QrGeneratorPage() {
                 </thead>
                 <tbody>
                   {taxis.map((taxi) => {
-                    const bookingUrl = buildTaxiBookingUrl(taxi.id);
+                    const bookingUrl = buildTaxiBookingUrl(taxi.token);
                     const isExpanded = expandedTaxiId === taxi.id;
                     const qrDataUrl = qrPreviewByTaxiId[taxi.id] || "";
                     const copyState = copyStateByTaxiId[taxi.id] || "idle";
@@ -493,8 +561,8 @@ function QrGeneratorPage() {
                 </div>
               </div>
 
-              <button type="submit" className="form-primary">
-                {editingTaxiId ? "Save changes" : "Save & generate"}
+              <button type="submit" className="form-primary" disabled={submitting}>
+                {submitting ? "Saving..." : editingTaxiId ? "Save changes" : "Save & generate"}
               </button>
             </form>
           </div>
