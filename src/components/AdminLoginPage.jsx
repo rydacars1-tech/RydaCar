@@ -1,5 +1,4 @@
 import { useState } from "react";
-import logo from "../assets/logo.jpeg";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 import { Spinner } from "./common/LoadingState.jsx";
 
@@ -51,10 +50,7 @@ function AdminLoginPage({ notice = "" }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-brand">
-          <img src={logo} alt="Ryda" className="auth-brand-logo" />
-          <div>
-            <div className="auth-brand-title">Ryda Car</div>
-          </div>
+          <div className="auth-brand-title">Ryda Car</div>
         </div>
 
         <form className="form auth-form" onSubmit={handleSubmit}>

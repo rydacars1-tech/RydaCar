@@ -3,7 +3,6 @@ import DriverShell from "./driver/DriverShell.jsx";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
 import { invalidateAdminDataCache, useCachedResource } from "../lib/adminCache.js";
 import { InlineLoadingNotice, LoadingBlock, Spinner } from "./common/LoadingState.jsx";
-import { DriverLocationIcon } from "./driver/DriverIcons.jsx";
 import {
   formatBookingStatusLabel,
   formatCompactDate,
@@ -16,6 +15,22 @@ import {
 
 function updateBookingsHash(filter) {
   window.location.hash = filter === "all" ? "#/driver/bookings" : `#/driver/bookings?status=${filter}`;
+}
+
+function getBookingIdentity(booking) {
+  return booking?.id || booking?.bookingId || "";
+}
+
+function normalizeBooking(booking) {
+  if (!booking) {
+    return booking;
+  }
+
+  return {
+    ...booking,
+    id: booking.id || booking.bookingId || "",
+    bookingId: booking.bookingId || booking.id || ""
+  };
 }
 
 function getActionDefinition(booking) {
@@ -47,9 +62,10 @@ function getActionDefinition(booking) {
   return null;
 }
 
-function BookingCard({ booking, onView, onAction, actionState }) {
+function DriverBookingRow({ booking, onView, onAction, actionState }) {
+  const bookingId = getBookingIdentity(booking);
   const action = getActionDefinition(booking);
-  const isBusy = actionState.bookingId === booking.id;
+  const isBusy = actionState.bookingId === bookingId;
   const statusTone = getBookingStatusTone(booking.status);
   const statusClassName = [
     "admin-status-badge",
@@ -61,70 +77,52 @@ function BookingCard({ booking, onView, onAction, actionState }) {
     .join(" ");
 
   return (
-    <article className="driver-booking-card driver-booking-card-enhanced">
-      <div className="driver-booking-top">
-        <div className="driver-booking-ref">
-          <strong>{booking.bookingNumber}</strong>
-          <span>{booking.source === "driver" ? "Created by driver" : "Assigned booking"}</span>
+    <tr className="admin-bookings-row">
+      <td>
+        <div className="driver-booking-table-id">{booking.bookingNumber || "-"}</div>
+        <div className="driver-booking-table-subtitle">{booking.source === "driver" ? "Created by driver" : "Assigned booking"}</div>
+      </td>
+      <td>
+        <div className="driver-booking-table-copy">{booking.customerName || "-"}</div>
+        <div className="driver-booking-table-subtitle">{booking.customerPhone || "-"}</div>
+      </td>
+      <td>
+        <div className="driver-booking-table-route" title={`${booking.pickup || "-"} -> ${booking.destination || "-"}`}>
+          <span>{booking.pickup || "-"}</span>
+          <span className="driver-booking-table-route-arrow" aria-hidden="true">
+            →
+          </span>
+          <span>{booking.destination || "-"}</span>
         </div>
+      </td>
+      <td>
+        <div className="driver-booking-table-copy">{booking.vehicleNumber || "-"}</div>
+        <div className="driver-booking-table-subtitle">{booking.taxiLabel || "Assigned taxi"}</div>
+      </td>
+      <td>
+        <div className="driver-booking-table-copy">{Number(booking.fare || 0).toLocaleString()}</div>
+        <div className="driver-booking-table-subtitle">{String(booking.paymentStatus || "pending").replace(/_/g, " ")}</div>
+      </td>
+      <td>
+        <div className="driver-booking-table-copy">{formatCompactDate(booking.createdAt || booking.bookingDate)}</div>
+        <div className="driver-booking-table-subtitle">{formatDateTime(booking.updatedAt || booking.createdAt)}</div>
+      </td>
+      <td>
         <span className={statusClassName}>{formatBookingStatusLabel(booking.status)}</span>
-      </div>
-
-      <div className="driver-booking-route">
-        <div className="driver-booking-route-stop">
-          <span className="driver-booking-route-icon">
-            <DriverLocationIcon />
-          </span>
-          <div>
-            <span className="driver-booking-route-label">Pickup</span>
-            <strong>{booking.pickup || "-"}</strong>
-          </div>
-        </div>
-        <div className="driver-booking-route-stop">
-          <span className="driver-booking-route-icon driver-booking-route-icon-destination">
-            <DriverLocationIcon />
-          </span>
-          <div>
-            <span className="driver-booking-route-label">Destination</span>
-            <strong>{booking.destination || "-"}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="driver-booking-info-grid">
-        <div className="driver-booking-info-item">
-          <span>Customer</span>
-          <strong>{booking.customerName || "-"}</strong>
-          <em>{booking.customerPhone || "-"}</em>
-        </div>
-        <div className="driver-booking-info-item">
-          <span>Taxi</span>
-          <strong>{booking.vehicleNumber || "-"}</strong>
-          <em>{booking.taxiLabel || "Assigned taxi"}</em>
-        </div>
-        <div className="driver-booking-info-item">
-          <span>Fare</span>
-          <strong>{Number(booking.fare || 0).toLocaleString()}</strong>
-          <em>{String(booking.paymentStatus || "pending").replace(/_/g, " ")}</em>
-        </div>
-        <div className="driver-booking-info-item">
-          <span>Date</span>
-          <strong>{formatCompactDate(booking.createdAt || booking.bookingDate)}</strong>
-          <em>{formatDateTime(booking.updatedAt || booking.createdAt)}</em>
-        </div>
-      </div>
-
-      <div className="driver-booking-footer">
-        <button type="button" className="admin-table-action" onClick={() => onView(booking)}>
-          View details
-        </button>
-        {action ? (
-          <button type="button" className="admin-table-action admin-table-action-primary" onClick={() => onAction(booking, action)} disabled={isBusy}>
-            {isBusy ? "Updating..." : action.label}
+      </td>
+      <td>
+        <div className="driver-booking-table-actions">
+          <button type="button" className="admin-table-action" onClick={() => onView(booking)}>
+            View details
           </button>
-        ) : null}
-      </div>
-    </article>
+          {action ? (
+            <button type="button" className="admin-table-action admin-table-action-primary" onClick={() => onAction(booking, action)} disabled={isBusy}>
+              {isBusy ? "Updating..." : action.label}
+            </button>
+          ) : null}
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -176,7 +174,7 @@ export default function DriverBookingsPage() {
     errorMessage: "Unable to load bookings."
   });
 
-  const bookings = useMemo(() => bookingsData.items || [], [bookingsData.items]);
+  const bookings = useMemo(() => (bookingsData.items || []).map(normalizeBooking), [bookingsData.items]);
   const [activeFilter, setActiveFilter] = useState(() => getDriverBookingFilter(getRouteQueryFromHash(window.location.hash).status).id);
 
   useEffect(() => {
@@ -207,15 +205,16 @@ export default function DriverBookingsPage() {
   }
 
   function updateBookingInList(nextBooking) {
+    const normalizedBooking = normalizeBooking(nextBooking);
     mutate((current) => {
       const currentItems = current.items || [];
       return {
         ...current,
-        items: currentItems.map((item) => (item.id === nextBooking.id ? nextBooking : item))
+        items: currentItems.map((item) => (getBookingIdentity(item) === getBookingIdentity(normalizedBooking) ? normalizedBooking : item))
       };
     });
 
-    setDetailBooking((current) => (current?.id === nextBooking.id ? nextBooking : current));
+    setDetailBooking((current) => (getBookingIdentity(current) === getBookingIdentity(normalizedBooking) ? normalizedBooking : current));
     invalidateAdminDataCache(user?.id, "driver:dashboard");
   }
 
@@ -258,7 +257,7 @@ export default function DriverBookingsPage() {
         const currentItems = current.items || [];
         return {
           ...current,
-          items: [bookingPayload.data, ...currentItems]
+          items: [normalizeBooking(bookingPayload.data), ...currentItems]
         };
       });
 
@@ -278,10 +277,16 @@ export default function DriverBookingsPage() {
       return;
     }
 
-    setActionState({ bookingId: booking.id, error: "", success: "" });
+    const bookingId = getBookingIdentity(booking);
+    if (!bookingId) {
+      setActionState({ bookingId: "", error: "Unable to update this booking because its ID is missing.", success: "" });
+      return;
+    }
+
+    setActionState({ bookingId, error: "", success: "" });
 
     try {
-      const payload = await authenticatedRequest(`/bookings/${booking.id}/${action.id}`, {
+      const payload = await authenticatedRequest(`/bookings/${bookingId}/${action.id}`, {
         method: "PATCH",
         ...(action.id === "complete" ? { body: JSON.stringify({ paymentStatus: "paid" }) } : {})
       });
@@ -343,16 +348,32 @@ export default function DriverBookingsPage() {
                   <div className="admin-empty-state-copy">Try another filter to review the rest of your authorized booking queue.</div>
                 </div>
               ) : (
-                <div className="driver-bookings-list driver-bookings-list-enhanced">
-                  {filteredBookings.map((booking) => (
-                    <BookingCard
-                      key={booking.id}
-                      booking={booking}
-                      onView={setDetailBooking}
-                      onAction={handleBookingAction}
-                      actionState={actionState}
-                    />
-                  ))}
+                <div className="admin-table-wrap admin-table-wrap-rich">
+                  <table className="admin-table admin-bookings-table driver-bookings-table">
+                    <thead>
+                      <tr>
+                        <th>Booking</th>
+                        <th>Customer</th>
+                        <th>Route</th>
+                        <th>Taxi</th>
+                        <th>Fare</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredBookings.map((booking) => (
+                        <DriverBookingRow
+                          key={getBookingIdentity(booking)}
+                          booking={booking}
+                          onView={setDetailBooking}
+                          onAction={handleBookingAction}
+                          actionState={actionState}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </>
@@ -442,14 +463,14 @@ export default function DriverBookingsPage() {
 
       {detailBooking ? (
         <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal">
+          <div className="modal driver-booking-detail-modal">
             <button type="button" className="modal-close" onClick={() => setDetailBooking(null)} aria-label="Close">
               ×
             </button>
             <div className="modal-title">{detailBooking.bookingNumber}</div>
             <div className="modal-text">Review the booking details scoped to your driver account and update its trip status when needed.</div>
 
-            <div className="admin-detail-grid" style={{ marginTop: "1rem" }}>
+            <div className="admin-detail-grid driver-booking-detail-grid" style={{ marginTop: "1rem" }}>
               <div className="admin-detail-item">
                 <div className="admin-detail-label">Pickup</div>
                 <div className="admin-detail-value">{detailBooking.pickup}</div>
@@ -492,9 +513,9 @@ export default function DriverBookingsPage() {
                   type="button"
                   className="admin-primary-button"
                   onClick={() => handleBookingAction(detailBooking, getActionDefinition(detailBooking))}
-                  disabled={actionState.bookingId === detailBooking.id}
+                  disabled={actionState.bookingId === getBookingIdentity(detailBooking)}
                 >
-                  {actionState.bookingId === detailBooking.id ? "Updating..." : getActionDefinition(detailBooking).label}
+                  {actionState.bookingId === getBookingIdentity(detailBooking) ? "Updating..." : getActionDefinition(detailBooking).label}
                 </button>
               </div>
             ) : null}

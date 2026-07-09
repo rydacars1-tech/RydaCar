@@ -2472,7 +2472,6 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.85rem;
   margin-bottom: 1.35rem;
 }
 
@@ -2490,7 +2489,7 @@ a {
 .auth-brand-title {
   color: #162033;
   font-size: 1.22rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .auth-brand-subtitle {
@@ -5224,6 +5223,57 @@ a {
   margin-top: 1rem;
 }
 
+.driver-bookings-table {
+  min-width: 1040px;
+}
+
+.driver-bookings-table .admin-bookings-row td {
+  color: #162033;
+}
+
+.driver-booking-table-id,
+.driver-booking-table-copy,
+.driver-booking-detail-grid .admin-detail-value,
+.driver-booking-detail-modal .modal-title {
+  color: #111827;
+  font-weight: 700;
+}
+
+.driver-booking-table-subtitle,
+.driver-booking-detail-modal .modal-text {
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.driver-booking-table-route {
+  color: #111827;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.driver-booking-table-route-arrow {
+  margin: 0 0.35rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.driver-booking-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.driver-booking-detail-grid .admin-detail-label {
+  font-weight: 800;
+}
+
+.driver-booking-detail-grid .admin-detail-value {
+  line-height: 1.55;
+}
+
 .driver-booking-card-enhanced {
   padding: 1rem;
   display: flex;
@@ -5648,6 +5698,10 @@ a {
   .driver-booking-card-enhanced {
     padding: 0.88rem;
     border-radius: 18px;
+  }
+
+  .driver-bookings-table {
+    min-width: 880px;
   }
 
   .driver-booking-info-grid {
