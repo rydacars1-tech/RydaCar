@@ -78,10 +78,13 @@ function QrGeneratorPage() {
     userId: user?.id,
     cacheKey: "qr:management",
     fetcher: async () => {
-      const [qrPayload, statsPayload] = await Promise.all([
+      const [qrPayload, driversPayload, statsPayload] = await Promise.all([
         authenticatedRequest("/qr", { method: "GET" }),
+        authenticatedRequest("/users/drivers", { method: "GET" }),
         authenticatedRequest("/dashboard/admin", { method: "GET" })
       ]);
+
+      const driversById = Object.fromEntries((driversPayload.data?.items || []).map((driver) => [driver.id, driver]));
 
       return {
         taxis: (qrPayload.data || []).map((item) => ({
@@ -91,6 +94,7 @@ function QrGeneratorPage() {
           taxiName: item.taxiName || item.label || "",
           driverName: item.driverName || "",
           driverPhone: item.driverPhone || "",
+          driverEmail: item.driverEmail || driversById[item.driverId]?.email || "",
           createdAt: item.createdAt || "",
           status: item.status || "active"
         })),
@@ -133,11 +137,14 @@ function QrGeneratorPage() {
     if (!normalizeTaxiNumber(taxiNumber)) nextErrors.taxiNumber = "Taxi number is required";
     if (!driverName.trim()) nextErrors.driverName = "Driver name is required";
     if (!driverPhone.trim()) nextErrors.driverPhone = "Driver phone is required";
+    const emailValue = driverEmail.trim().toLowerCase();
     if (!editingTaxiId) {
-      const emailValue = driverEmail.trim().toLowerCase();
       if (!emailValue) nextErrors.driverEmail = "Driver email is required";
       if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) nextErrors.driverEmail = "Enter a valid email address";
       if (!driverPassword) nextErrors.driverPassword = "Driver password is required";
+      if (driverPassword && driverPassword.length < 6) nextErrors.driverPassword = "Password must be at least 6 characters";
+    } else {
+      if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) nextErrors.driverEmail = "Enter a valid email address";
       if (driverPassword && driverPassword.length < 6) nextErrors.driverPassword = "Password must be at least 6 characters";
     }
     setErrors(nextErrors);
@@ -166,7 +173,7 @@ function QrGeneratorPage() {
     setTaxiName(taxi.taxiName || "");
     setDriverName(taxi.driverName || "");
     setDriverPhone(taxi.driverPhone || "");
-    setDriverEmail("");
+    setDriverEmail(taxi.driverEmail || "");
     setDriverPassword("");
     setErrors({});
     setCreateModalOpen(true);
@@ -185,12 +192,8 @@ function QrGeneratorPage() {
         vehicleNumber: normalizeTaxiNumber(taxiNumber),
         driverName: driverName.trim(),
         driverPhone: driverPhone.trim(),
-        ...(editingTaxiId
-          ? {}
-          : {
-              driverEmail: driverEmail.trim().toLowerCase(),
-              driverPassword
-            })
+        driverEmail: driverEmail.trim().toLowerCase(),
+        ...(driverPassword ? { driverPassword } : {})
       };
 
       const response = editingTaxiId
@@ -210,6 +213,7 @@ function QrGeneratorPage() {
         taxiName: response.data.taxiName || response.data.label || "",
         driverName: response.data.driverName || "",
         driverPhone: response.data.driverPhone || "",
+        driverEmail: response.data.driverEmail || driverEmail.trim().toLowerCase(),
         createdAt: response.data.createdAt || new Date().toISOString(),
         status: response.data.status || "active"
       };
@@ -583,33 +587,31 @@ function QrGeneratorPage() {
                 </div>
               </div>
 
-              {!editingTaxiId ? (
-                <div className="form-two">
-                  <div className="form-field">
-                    <label className="form-label">Driver email</label>
-                    <input
-                      type="email"
-                      className="form-input"
-                      value={driverEmail}
-                      onChange={(event) => setDriverEmail(event.target.value)}
-                      placeholder="Required"
-                    />
-                    {errors.driverEmail && <div className="form-error">{errors.driverEmail}</div>}
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Driver password</label>
-                    <input
-                      type="password"
-                      className="form-input"
-                      value={driverPassword}
-                      onChange={(event) => setDriverPassword(event.target.value)}
-                      placeholder="Required"
-                    />
-                    {errors.driverPassword && <div className="form-error">{errors.driverPassword}</div>}
-                  </div>
+              <div className="form-two">
+                <div className="form-field">
+                  <label className="form-label">Driver email</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={driverEmail}
+                    onChange={(event) => setDriverEmail(event.target.value)}
+                    placeholder={editingTaxiId ? "Existing driver email" : "Required"}
+                  />
+                  {errors.driverEmail && <div className="form-error">{errors.driverEmail}</div>}
                 </div>
-              ) : null}
+
+                <div className="form-field">
+                  <label className="form-label">Driver password</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    value={driverPassword}
+                    onChange={(event) => setDriverPassword(event.target.value)}
+                    placeholder={editingTaxiId ? "Leave blank to keep current password" : "Required"}
+                  />
+                  {errors.driverPassword && <div className="form-error">{errors.driverPassword}</div>}
+                </div>
+              </div>
 
               <button type="submit" className="form-primary" disabled={submitting}>
                 {submitting ? "Saving..." : editingTaxiId ? "Save changes" : "Save & generate"}

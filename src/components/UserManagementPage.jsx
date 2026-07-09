@@ -13,9 +13,13 @@ function UserManagementPage() {
   const { authenticatedRequest, user: sessionUser } = useAdminAuth();
   const [searchValue, setSearchValue] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [deleteUser, setDeleteUser] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [formValues, setFormValues] = useState({ name: "", email: "", password: "" });
+  const [editFormValues, setEditFormValues] = useState({ name: "", email: "", phone: "", password: "" });
   const [errors, setErrors] = useState({});
   const {
     data: userPageData,
@@ -80,14 +84,13 @@ function UserManagementPage() {
     });
   }, [users, searchValue]);
 
-  const counts = useMemo(() => {
-    const drivers = users.filter((user) => user.role === "Driver").length;
-    const subAdmins = users.filter((user) => user.role === "Sub Admin").length;
-    const active = users.filter((user) => user.status === "Active").length;
-    return { drivers, subAdmins, active };
-  }, [users]);
   function resetForm() {
     setFormValues({ name: "", email: "", password: "" });
+    setErrors({});
+  }
+
+  function resetEditForm() {
+    setEditFormValues({ name: "", email: "", phone: "", password: "" });
     setErrors({});
   }
 
@@ -95,6 +98,23 @@ function UserManagementPage() {
     setCreateModalOpen(false);
     setSubmitting(false);
     resetForm();
+  }
+
+  function openEditModal(user) {
+    setEditUser(user);
+    setEditFormValues({
+      name: user.name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      password: ""
+    });
+    setErrors({});
+  }
+
+  function closeEditModal() {
+    setEditUser(null);
+    setActionSubmitting(false);
+    resetEditForm();
   }
 
   function validateForm() {
@@ -166,6 +186,100 @@ function UserManagementPage() {
     }
   }
 
+  function validateEditForm() {
+    const nextErrors = {};
+    if (!editFormValues.name.trim()) {
+      nextErrors.name = "Name is required.";
+    }
+
+    if (!editFormValues.email.trim()) {
+      nextErrors.email = "Email is required.";
+    } else if (!isValidEmail(editFormValues.email.trim())) {
+      nextErrors.email = "Enter a valid email address.";
+    } else if (
+      users.some((user) => user.id !== editUser?.id && String(user.email || "").toLowerCase() === editFormValues.email.trim().toLowerCase())
+    ) {
+      nextErrors.email = "This email already exists.";
+    }
+
+    if (editFormValues.password && editFormValues.password.length < 6) {
+      nextErrors.password = "Password must be at least 6 characters.";
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  async function handleUpdateAdmin(event) {
+    event.preventDefault();
+    setFeedback("");
+
+    if (!editUser || !validateEditForm()) {
+      return;
+    }
+
+    setActionSubmitting(true);
+
+    try {
+      const payload = await authenticatedRequest(`/auth/admin-users/${editUser.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: editFormValues.name.trim(),
+          email: editFormValues.email.trim().toLowerCase(),
+          phone: editFormValues.phone.trim(),
+          ...(editFormValues.password ? { password: editFormValues.password } : {})
+        })
+      });
+
+      const updatedUser = {
+        ...editUser,
+        id: payload.data.id,
+        name: payload.data.name,
+        email: payload.data.email,
+        phone: payload.data.phone || "",
+        role: payload.data.role === "super_admin" ? "Super Admin" : "Sub Admin",
+        status: payload.data.status === "active" ? "Active" : "Inactive",
+        lastSeen: payload.data.updatedAt ? formatDateTime(payload.data.updatedAt) : editUser.lastSeen
+      };
+
+      mutate((current) => ({
+        ...current,
+        users: current.users.map((user) => (user.id === updatedUser.id ? { ...user, ...updatedUser } : user))
+      }));
+      setFeedback("Admin updated successfully.");
+      closeEditModal();
+    } catch (error) {
+      setFeedback(error?.message || "Unable to update admin.");
+      setActionSubmitting(false);
+    }
+  }
+
+  async function handleDeleteAdmin() {
+    if (!deleteUser) {
+      return;
+    }
+
+    setActionSubmitting(true);
+    setFeedback("");
+
+    try {
+      await authenticatedRequest(`/auth/admin-users/${deleteUser.id}`, {
+        method: "DELETE"
+      });
+
+      mutate((current) => ({
+        ...current,
+        users: current.users.filter((user) => user.id !== deleteUser.id)
+      }));
+      setDeleteUser(null);
+      setActionSubmitting(false);
+      setFeedback("Admin deleted successfully.");
+    } catch (error) {
+      setFeedback(error?.message || "Unable to delete admin.");
+      setActionSubmitting(false);
+    }
+  }
+
   return (
     <AdminShell
       activeNav="users"
@@ -203,15 +317,7 @@ function UserManagementPage() {
           </div>
         </div>
 
-        <div className="admin-users-toolbar">
-          <div className="admin-users-inline-stats">
-            <span>{users.length} users</span>
-            <span>{counts.drivers} drivers</span>
-            <span>{counts.subAdmins} sub admins</span>
-            <span>{counts.active} active</span>
-          </div>
-          {feedback || loadError ? <div className="admin-inline-feedback admin-inline-feedback-tight">{feedback || loadError}</div> : null}
-        </div>
+        {feedback || loadError ? <div className="admin-inline-feedback admin-inline-feedback-tight">{feedback || loadError}</div> : null}
 
         {isLoading ? (
           <div className="admin-loading-state">
@@ -234,6 +340,7 @@ function UserManagementPage() {
                   <th>Access</th>
                   <th>Status</th>
                   <th>Last activity</th>
+                  {sessionUser?.role === "super_admin" ? <th>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -266,6 +373,24 @@ function UserManagementPage() {
                       </span>
                     </td>
                     <td>{user.lastSeen}</td>
+                    {sessionUser?.role === "super_admin" ? (
+                      <td>
+                        {user.role !== "Driver" ? (
+                          <div className="admin-row-actions admin-row-actions-compact">
+                            <button type="button" className="admin-table-action admin-table-action-icon" onClick={() => openEditModal(user)}>
+                              Edit
+                            </button>
+                            {user.role !== "Super Admin" ? (
+                              <button type="button" className="admin-table-action admin-table-action-danger" onClick={() => setDeleteUser(user)}>
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="admin-table-muted">Driver account</span>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -323,6 +448,89 @@ function UserManagementPage() {
                 {submitting ? "Creating..." : "Create sub admin"}
               </button>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {editUser && sessionUser?.role === "super_admin" ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <button type="button" className="modal-close" onClick={closeEditModal} aria-label="Close">
+              ×
+            </button>
+            <div className="modal-title">Edit Admin</div>
+            <div className="modal-text">Only the main admin can edit admin account details. Leave password blank to keep the current password.</div>
+
+            <form className="form" onSubmit={handleUpdateAdmin}>
+              <div className="form-field">
+                <label className="form-label">Name</label>
+                <input
+                  className="form-input"
+                  value={editFormValues.name}
+                  onChange={(event) => setEditFormValues((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Required"
+                />
+                {errors.name ? <div className="form-error">{errors.name}</div> : null}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">Email</label>
+                <input
+                  className="form-input"
+                  type="email"
+                  value={editFormValues.email}
+                  onChange={(event) => setEditFormValues((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="name@example.com"
+                />
+                {errors.email ? <div className="form-error">{errors.email}</div> : null}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">Phone</label>
+                <input
+                  className="form-input"
+                  value={editFormValues.phone}
+                  onChange={(event) => setEditFormValues((current) => ({ ...current, phone: event.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="form-field">
+                <label className="form-label">Password</label>
+                <input
+                  className="form-input"
+                  type="password"
+                  value={editFormValues.password}
+                  onChange={(event) => setEditFormValues((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Leave blank to keep current password"
+                />
+                {errors.password ? <div className="form-error">{errors.password}</div> : null}
+              </div>
+
+              <button type="submit" className="form-primary" disabled={actionSubmitting}>
+                {actionSubmitting ? "Saving..." : "Save changes"}
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteUser && sessionUser?.role === "super_admin" ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal">
+            <button type="button" className="modal-close" onClick={() => setDeleteUser(null)} aria-label="Close">
+              ×
+            </button>
+            <div className="modal-title">Delete Admin</div>
+            <div className="modal-text">Only the main admin can delete sub admin accounts. This action removes the admin from the list.</div>
+            <div className="modal-actions">
+              <button type="button" className="admin-ghost-button" onClick={() => setDeleteUser(null)} disabled={actionSubmitting}>
+                Cancel
+              </button>
+              <button type="button" className="admin-danger-button" onClick={handleDeleteAdmin} disabled={actionSubmitting}>
+                {actionSubmitting ? "Deleting..." : "Delete admin"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

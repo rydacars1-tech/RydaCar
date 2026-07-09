@@ -103,7 +103,6 @@ function EmailPage() {
           preview: buildEmailPreview(item.payload),
           receivedAt: item.createdAt,
           status: item.status || "queued",
-          category: item.channel || "email",
           templateLabel: formatLabel(item.template, "System notification")
         })),
         openBookingsCount: Number(statsPayload.data?.pendingBookings || 0)
@@ -194,12 +193,11 @@ function EmailPage() {
                 <div className="admin-email-row-main">
                   <div className="admin-email-row-top">
                     <div className="admin-email-row-from">
-                      <strong>{item.templateLabel}</strong>
+                      <strong>{item.subject}</strong>
                     </div>
                     <time className="admin-email-row-time">{formatDateTime(item.receivedAt)}</time>
                   </div>
 
-                  <div className="admin-email-row-subject">{item.subject}</div>
                   <div className="admin-email-row-preview">{item.preview}</div>
                   <div className="admin-email-row-meta">
                     <span className="admin-email-chip admin-email-chip-muted">{item.templateLabel}</span>
