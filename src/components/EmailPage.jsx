@@ -99,7 +99,6 @@ function EmailPage() {
       return {
         emails: (logsPayload.data || []).map((item) => ({
           id: item.notificationId,
-          recipient: Array.isArray(item.to) && item.to[0] ? item.to[0] : "noreply@ryda.app",
           subject: normalizeText(item.payload?.subject) || formatLabel(item.template, "System notification"),
           preview: buildEmailPreview(item.payload),
           receivedAt: item.createdAt,
@@ -134,7 +133,7 @@ function EmailPage() {
     <AdminShell
       activeNav="email"
       openBookingsCount={openBookingsCount}
-      title="Emails"
+      title="Notifications"
       actions={
         <div className="admin-toolbar admin-toolbar-filters">
           <label className="admin-filter-select-wrap">
@@ -165,14 +164,14 @@ function EmailPage() {
       }
     >
       <section className="admin-panel-card">
-        {isFetching && !isLoading ? <InlineLoadingNotice label="Refreshing email activity..." /> : null}
+        {isFetching && !isLoading ? <InlineLoadingNotice label="Refreshing notification activity..." /> : null}
 
         <div className="admin-section-head">
           <div>
-            <div className="admin-section-title">Inbox list</div>
+            <div className="admin-section-title">Notification list</div>
           </div>
           <div className="admin-email-counts">
-            <span>{filteredEmails.length} filtered emails</span>
+            <span>{filteredEmails.length} filtered notifications</span>
             <span>{emails.filter((item) => item.status === "queued").length} queued</span>
           </div>
         </div>
@@ -181,12 +180,12 @@ function EmailPage() {
 
         {isLoading ? (
           <div className="admin-loading-state">
-            <LoadingBlock title="Loading emails" copy="Fetching notification logs and queued email activity." compact />
+            <LoadingBlock title="Loading notifications" copy="Fetching notification logs and queued notification activity." compact />
           </div>
         ) : filteredEmails.length === 0 ? (
           <div className="admin-empty-state">
-            <div className="admin-empty-state-title">No emails in this filter</div>
-            <div className="admin-empty-state-copy">Try another status or date range to view inbox activity.</div>
+            <div className="admin-empty-state-title">No notifications in this filter</div>
+            <div className="admin-empty-state-copy">Try another status or date range to view notification activity.</div>
           </div>
         ) : (
           <div className="admin-email-list">
@@ -195,8 +194,7 @@ function EmailPage() {
                 <div className="admin-email-row-main">
                   <div className="admin-email-row-top">
                     <div className="admin-email-row-from">
-                      <strong>{item.recipient}</strong>
-                      <span>To recipient</span>
+                      <strong>{item.templateLabel}</strong>
                     </div>
                     <time className="admin-email-row-time">{formatDateTime(item.receivedAt)}</time>
                   </div>
@@ -204,7 +202,6 @@ function EmailPage() {
                   <div className="admin-email-row-subject">{item.subject}</div>
                   <div className="admin-email-row-preview">{item.preview}</div>
                   <div className="admin-email-row-meta">
-                    <span className="admin-email-chip">{formatLabel(item.category, "Email")}</span>
                     <span className="admin-email-chip admin-email-chip-muted">{item.templateLabel}</span>
                   </div>
                 </div>

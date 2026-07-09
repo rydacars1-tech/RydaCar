@@ -362,8 +362,8 @@ export function getAdminNavigation(openCount) {
     },
     {
       id: "email",
-      label: "Email",
-      description: "Admin inbox and messages",
+      label: "Notifications",
+      description: "Admin notification activity",
       hash: "#/emails",
       badge: "12"
     },
