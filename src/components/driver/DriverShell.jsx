@@ -1,10 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import logo from "../../assets/logo.jpeg";
 import { useAdminAuth } from "../../context/AdminAuthContext.jsx";
-import { getAdminNavigation, navigateTo } from "./adminData.js";
+import { useCachedResource } from "../../lib/adminCache.js";
 import MobileAppHeader, { useMobileDrawerEffects } from "../layout/MobileAppHeader.jsx";
 
-function AdminIcon({ icon }) {
+function navigateTo(hash) {
+  window.location.hash = hash;
+}
+
+function DriverIcon({ icon }) {
   const sharedProps = {
     xmlns: "http://www.w3.org/2000/svg",
     width: "20",
@@ -16,20 +20,6 @@ function AdminIcon({ icon }) {
     strokeLinecap: "round",
     strokeLinejoin: "round"
   };
-
-  if (icon === "qr") {
-    return (
-      <svg {...sharedProps}>
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <path d="M14 14h3v3h-3z" />
-        <path d="M18 18h3v3h-3z" />
-        <path d="M18 14h3" />
-        <path d="M14 20h1" />
-      </svg>
-    );
-  }
 
   if (icon === "bookings") {
     return (
@@ -44,41 +34,20 @@ function AdminIcon({ icon }) {
     );
   }
 
-  if (icon === "users") {
+  if (icon === "notifications") {
     return (
       <svg {...sharedProps}>
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
       </svg>
     );
   }
 
-  if (icon === "email") {
+  if (icon === "profile") {
     return (
       <svg {...sharedProps}>
-        <path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" />
-        <path d="m22 8-8.97 5.7a2 2 0 0 1-2.06 0L2 8" />
-      </svg>
-    );
-  }
-
-  if (icon === "revenue") {
-    return (
-      <svg {...sharedProps}>
-        <path d="M3 3v18h18" />
-        <path d="m7 15 4-4 3 3 5-6" />
-        <path d="M18 8h1" />
-      </svg>
-    );
-  }
-
-  if (icon === "settings") {
-    return (
-      <svg {...sharedProps}>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33A1.65 1.65 0 0 0 4.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 8a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1 .33H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1 .33A1.65 1.65 0 0 0 19.4 15z" />
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
       </svg>
     );
   }
@@ -94,18 +63,12 @@ function AdminIcon({ icon }) {
 }
 
 function SidebarItem({ item, activeId, onNavigate }) {
-  const className = [
-    "admin-sidebar-link",
-    item.id === activeId ? "admin-sidebar-link-active" : "",
-    item.disabled ? "admin-sidebar-link-disabled" : ""
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const className = ["admin-sidebar-link", item.id === activeId ? "admin-sidebar-link-active" : ""].filter(Boolean).join(" ");
 
   return (
-    <button type="button" className={className} onClick={() => onNavigate(item)} disabled={item.disabled}>
+    <button type="button" className={className} onClick={() => onNavigate(item)}>
       <span className="admin-sidebar-link-icon">
-        <AdminIcon icon={item.id} />
+        <DriverIcon icon={item.id} />
       </span>
       <span className="admin-sidebar-link-copy">
         <span className="admin-sidebar-link-label">{item.label}</span>
@@ -115,34 +78,45 @@ function SidebarItem({ item, activeId, onNavigate }) {
   );
 }
 
-function SecondaryTab({ tab, active, onClick }) {
-  return (
-    <button
-      type="button"
-      className={active ? "admin-secondary-tab admin-secondary-tab-active" : "admin-secondary-tab"}
-      onClick={onClick}
-    >
-      {tab.label}
-      {tab.badge ? <span className="admin-secondary-tab-badge">{tab.badge}</span> : null}
-    </button>
-  );
-}
-
-function AdminShell({
-  activeNav,
-  openBookingsCount = 0,
-  title,
-  actions = null,
-  mobilePrimaryAction = null,
-  mobileSecondaryActions = null,
-  secondaryTabs = [],
-  children
-}) {
+export default function DriverShell({ activeNav = "dashboard", title = "", actions = null, children }) {
+  const { authenticatedRequest, user, logout } = useAdminAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const { logout, user } = useAdminAuth();
-  const navigation = useMemo(() => getAdminNavigation(openBookingsCount), [openBookingsCount]);
-  const mobileDrawerId = "admin-mobile-drawer";
-  const hasMobileHeaderActions = Boolean(mobilePrimaryAction || mobileSecondaryActions);
+  const mobileDrawerId = "driver-mobile-drawer";
+  const {
+    data: unreadData,
+    refresh: refreshUnread
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "driver:notifications:unread",
+    fetcher: async () => {
+      const payload = await authenticatedRequest("/notifications/unread-count", { method: "GET" });
+      return payload.data || { unreadCount: 0 };
+    },
+    staleTime: 15_000,
+    emptyValue: { unreadCount: 0 },
+    errorMessage: "Unable to load unread notifications."
+  });
+  const unreadCount = Number(unreadData?.unreadCount || 0);
+  const unreadBadge = unreadCount > 99 ? "99+" : unreadCount > 0 ? String(unreadCount) : "";
+
+  useEffect(() => {
+    function handleUnreadRefresh() {
+      refreshUnread().catch(() => {});
+    }
+
+    window.addEventListener("driver-notifications:refresh", handleUnreadRefresh);
+    return () => window.removeEventListener("driver-notifications:refresh", handleUnreadRefresh);
+  }, [refreshUnread]);
+
+  const navigation = useMemo(
+    () => [
+      { id: "dashboard", label: "Dashboard", hash: "#/driver/dashboard" },
+      { id: "bookings", label: "Bookings", hash: "#/driver/bookings" },
+      { id: "notifications", label: "Notifications", hash: "#/driver/notifications", badge: unreadBadge },
+      { id: "profile", label: "Profile", hash: "#/driver/profile" }
+    ],
+    [unreadBadge]
+  );
 
   const closeMobileNav = useCallback(() => {
     setMobileNavOpen(false);
@@ -151,20 +125,18 @@ function AdminShell({
   useMobileDrawerEffects(mobileNavOpen, closeMobileNav, mobileDrawerId);
 
   function handleNavigate(item) {
-    if (!item.disabled && item.hash) {
-      closeMobileNav();
-      navigateTo(item.hash);
-    }
+    closeMobileNav();
+    navigateTo(item.hash);
   }
 
   async function handleLogout() {
     closeMobileNav();
     await logout();
-    navigateTo("#/dashboard");
+    navigateTo("#/login");
   }
 
   return (
-    <div className="admin-shell">
+    <div className="admin-shell driver-shell">
       <MobileAppHeader drawerOpen={mobileNavOpen} onToggle={() => setMobileNavOpen((current) => !current)} drawerId={mobileDrawerId} />
       <aside className="admin-sidebar">
         <div className="admin-brand">
@@ -173,7 +145,7 @@ function AdminShell({
           </div>
           <div className="admin-brand-copy">
             <div className="admin-brand-title">Ryda Car</div>
-            <div className="admin-brand-subtitle">Admin Panel</div>
+            <div className="admin-brand-subtitle">Driver Portal</div>
           </div>
         </div>
 
@@ -187,7 +159,7 @@ function AdminShell({
           {user ? (
             <div className="admin-sidebar-user">
               <strong>{user.name}</strong>
-              <span>{user.role.replace("_", " ")}</span>
+              <span>Driver</span>
             </div>
           ) : null}
           <button type="button" className="admin-sidebar-logout" onClick={handleLogout}>
@@ -205,42 +177,19 @@ function AdminShell({
 
       <div className="admin-main">
         <header className="admin-topbar">
-          <div className="admin-topbar-main-row">
-            <div className="admin-topbar-left">
-              <button
-                type="button"
-                className="admin-mobile-menu"
-                onClick={() => setMobileNavOpen((current) => !current)}
-                aria-label="Open navigation"
-              >
-                <span />
-                <span />
-                <span />
-              </button>
-              <div>
-                <h1 className="admin-page-title">{title}</h1>
-              </div>
+          <div className="admin-topbar-left">
+            <button type="button" className="admin-mobile-menu" onClick={() => setMobileNavOpen((current) => !current)} aria-label="Open navigation">
+              <span />
+              <span />
+              <span />
+            </button>
+            <div>
+              <h1 className="admin-page-title">{title}</h1>
             </div>
-
-            {hasMobileHeaderActions ? <div className="admin-topbar-mobile-primary">{mobilePrimaryAction}</div> : null}
-
-            {actions ? (
-              <div className={hasMobileHeaderActions ? "admin-topbar-right admin-topbar-right-desktop-only" : "admin-topbar-right"}>
-                <div className="admin-topbar-actions">{actions}</div>
-              </div>
-            ) : null}
           </div>
 
-          {hasMobileHeaderActions && mobileSecondaryActions ? <div className="admin-topbar-mobile-secondary">{mobileSecondaryActions}</div> : null}
+          <div className="admin-topbar-right">{actions ? <div className="admin-topbar-actions">{actions}</div> : null}</div>
         </header>
-
-        {secondaryTabs.length > 0 ? (
-          <div className="admin-secondary-tabs">
-            {secondaryTabs.map((tab) => (
-              <SecondaryTab key={tab.id} tab={tab} active={tab.active} onClick={tab.onClick} />
-            ))}
-          </div>
-        ) : null}
 
         <main className="admin-content">{children}</main>
       </div>
@@ -255,7 +204,7 @@ function AdminShell({
                 </div>
                 <div className="admin-brand-copy">
                   <div className="admin-brand-title">Ryda Car</div>
-                  <div className="admin-brand-subtitle">Admin Panel</div>
+                  <div className="admin-brand-subtitle">Driver Portal</div>
                 </div>
               </div>
               <button type="button" className="admin-mobile-close" onClick={closeMobileNav} aria-label="Close navigation">
@@ -273,7 +222,7 @@ function AdminShell({
               {user ? (
                 <div className="admin-sidebar-user">
                   <strong>{user.name}</strong>
-                  <span>{user.role.replace("_", " ")}</span>
+                  <span>Driver</span>
                 </div>
               ) : null}
               <button type="button" className="admin-sidebar-logout" onClick={handleLogout}>
@@ -293,5 +242,3 @@ function AdminShell({
     </div>
   );
 }
-
-export default AdminShell;

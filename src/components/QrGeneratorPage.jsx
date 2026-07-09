@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import * as QRCode from "qrcode";
 import AdminShell from "./admin/AdminShell.jsx";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { invalidateAdminDataCache, useCachedResource } from "../lib/adminCache.js";
+import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 
 function normalizeTaxiNumber(value) {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
@@ -55,11 +57,9 @@ function TrashIcon() {
 }
 
 function QrGeneratorPage() {
-  const { authenticatedRequest } = useAdminAuth();
-  const [taxis, setTaxis] = useState([]);
+  const { authenticatedRequest, user } = useAdminAuth();
   const [expandedTaxiId, setExpandedTaxiId] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [openBookingsCount, setOpenBookingsCount] = useState(0);
   const [qrPreviewByTaxiId, setQrPreviewByTaxiId] = useState({});
   const [copyStateByTaxiId, setCopyStateByTaxiId] = useState({});
   const [downloadingTaxiId, setDownloadingTaxiId] = useState("");
@@ -67,8 +67,42 @@ function QrGeneratorPage() {
   const [deletingTaxiId, setDeletingTaxiId] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [actionFeedback, setActionFeedback] = useState("");
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const {
+    data: qrPageData,
+    error: loadError,
+    isLoading,
+    isFetching,
+    mutate
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "qr:management",
+    fetcher: async () => {
+      const [qrPayload, statsPayload] = await Promise.all([
+        authenticatedRequest("/qr", { method: "GET" }),
+        authenticatedRequest("/dashboard/admin", { method: "GET" })
+      ]);
+
+      return {
+        taxis: (qrPayload.data || []).map((item) => ({
+          id: item.id,
+          token: item.token,
+          taxiNumber: item.vehicleNumber || "",
+          taxiName: item.taxiName || item.label || "",
+          driverName: item.driverName || "",
+          driverPhone: item.driverPhone || "",
+          createdAt: item.createdAt || "",
+          status: item.status || "active"
+        })),
+        openBookingsCount: Number(statsPayload.data?.pendingBookings || 0)
+      };
+    },
+    staleTime: 60_000,
+    emptyValue: { taxis: [], openBookingsCount: 0 },
+    errorMessage: "Unable to load QR codes right now."
+  });
+  const taxis = qrPageData.taxis || [];
+  const openBookingsCount = qrPageData.openBookingsCount || 0;
 
   const expandedTaxi = useMemo(() => taxis.find((taxi) => taxi.id === expandedTaxiId) || null, [taxis, expandedTaxiId]);
 
@@ -76,54 +110,9 @@ function QrGeneratorPage() {
   const [taxiName, setTaxiName] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
+  const [driverEmail, setDriverEmail] = useState("");
+  const [driverPassword, setDriverPassword] = useState("");
   const [errors, setErrors] = useState({});
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadData() {
-      setLoading(true);
-
-      try {
-        const [qrPayload, statsPayload] = await Promise.all([
-          authenticatedRequest("/qr", { method: "GET" }),
-          authenticatedRequest("/dashboard/admin", { method: "GET" })
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        setTaxis(
-          (qrPayload.data || []).map((item) => ({
-            id: item.id,
-            token: item.token,
-            taxiNumber: item.vehicleNumber || "",
-            taxiName: item.taxiName || item.label || "",
-            driverName: item.driverName || "",
-            driverPhone: item.driverPhone || "",
-            createdAt: item.createdAt || "",
-            status: item.status || "active"
-          }))
-        );
-        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
-      } catch (error) {
-        if (active) {
-          setActionFeedback(error?.message || "Unable to load QR codes right now.");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadData();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
 
   useEffect(() => {
     if (!expandedTaxi || qrPreviewByTaxiId[expandedTaxi.id]) {
@@ -144,6 +133,13 @@ function QrGeneratorPage() {
     if (!normalizeTaxiNumber(taxiNumber)) nextErrors.taxiNumber = "Taxi number is required";
     if (!driverName.trim()) nextErrors.driverName = "Driver name is required";
     if (!driverPhone.trim()) nextErrors.driverPhone = "Driver phone is required";
+    if (!editingTaxiId) {
+      const emailValue = driverEmail.trim().toLowerCase();
+      if (!emailValue) nextErrors.driverEmail = "Driver email is required";
+      if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) nextErrors.driverEmail = "Enter a valid email address";
+      if (!driverPassword) nextErrors.driverPassword = "Driver password is required";
+      if (driverPassword && driverPassword.length < 6) nextErrors.driverPassword = "Password must be at least 6 characters";
+    }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -153,6 +149,8 @@ function QrGeneratorPage() {
     setTaxiName("");
     setDriverName("");
     setDriverPhone("");
+    setDriverEmail("");
+    setDriverPassword("");
     setErrors({});
     setEditingTaxiId("");
   }
@@ -168,6 +166,8 @@ function QrGeneratorPage() {
     setTaxiName(taxi.taxiName || "");
     setDriverName(taxi.driverName || "");
     setDriverPhone(taxi.driverPhone || "");
+    setDriverEmail("");
+    setDriverPassword("");
     setErrors({});
     setCreateModalOpen(true);
   }
@@ -184,7 +184,13 @@ function QrGeneratorPage() {
         label: taxiName.trim() || normalizeTaxiNumber(taxiNumber),
         vehicleNumber: normalizeTaxiNumber(taxiNumber),
         driverName: driverName.trim(),
-        driverPhone: driverPhone.trim()
+        driverPhone: driverPhone.trim(),
+        ...(editingTaxiId
+          ? {}
+          : {
+              driverEmail: driverEmail.trim().toLowerCase(),
+              driverPassword
+            })
       };
 
       const response = editingTaxiId
@@ -208,9 +214,11 @@ function QrGeneratorPage() {
         status: response.data.status || "active"
       };
 
-      setTaxis((current) =>
-        editingTaxiId ? current.map((taxi) => (taxi.id === editingTaxiId ? { ...taxi, ...savedTaxi } : taxi)) : [savedTaxi, ...current]
-      );
+      mutate((current) => ({
+        ...current,
+        taxis: editingTaxiId ? current.taxis.map((taxi) => (taxi.id === editingTaxiId ? { ...taxi, ...savedTaxi } : taxi)) : [savedTaxi, ...current.taxis]
+      }));
+      invalidateAdminDataCache(user?.id, "dashboard:analytics");
       setExpandedTaxiId(savedTaxi.id);
       setCreateModalOpen(false);
       setActionFeedback(editingTaxiId ? "Taxi updated successfully." : "Taxi created successfully.");
@@ -294,7 +302,11 @@ function QrGeneratorPage() {
       });
 
       const nextTaxis = taxis.filter((taxi) => taxi.id !== deleteCandidate.id);
-      setTaxis(nextTaxis);
+      mutate((current) => ({
+        ...current,
+        taxis: current.taxis.filter((taxi) => taxi.id !== deleteCandidate.id)
+      }));
+      invalidateAdminDataCache(user?.id, "dashboard:analytics");
       setQrPreviewByTaxiId((current) => {
         const next = { ...current };
         delete next[deleteCandidate.id];
@@ -327,9 +339,16 @@ function QrGeneratorPage() {
           Generate QR code
         </button>
       }
+      mobilePrimaryAction={
+        <button type="button" className="admin-primary-button" onClick={openCreateModal}>
+          Generate QR
+        </button>
+      }
     >
       <section className="admin-dashboard-grid">
         <div className="admin-panel-card">
+          {isFetching && !isLoading ? <InlineLoadingNotice label="Refreshing QR codes..." /> : null}
+
           <div className="admin-section-head">
             <div>
               <div className="admin-section-title">Saved taxis</div>
@@ -345,7 +364,8 @@ function QrGeneratorPage() {
                 onClick={async () => {
                   try {
                     await Promise.all(taxis.map((taxi) => authenticatedRequest(`/qr/${taxi.id}`, { method: "DELETE" })));
-                    setTaxis([]);
+                    mutate((current) => ({ ...current, taxis: [] }));
+                    invalidateAdminDataCache(user?.id, "dashboard:analytics");
                     setExpandedTaxiId("");
                     setQrPreviewByTaxiId({});
                     setActionFeedback("All taxis deleted successfully.");
@@ -360,10 +380,12 @@ function QrGeneratorPage() {
             </div>
           </div>
 
-          {actionFeedback ? <div className="admin-inline-feedback">{actionFeedback}</div> : null}
+          {actionFeedback || loadError ? <div className="admin-inline-feedback">{actionFeedback || loadError}</div> : null}
 
-          {loading ? (
-            <div className="admin-loading-state">Loading QR codes...</div>
+          {isLoading ? (
+            <div className="admin-loading-state">
+              <LoadingBlock title="Loading QR codes" copy="Fetching saved taxis and their booking links." compact />
+            </div>
           ) : taxis.length === 0 ? (
             <div className="admin-empty-state">
               <div className="admin-empty-state-title">No QR entries created yet</div>
@@ -560,6 +582,34 @@ function QrGeneratorPage() {
                   {errors.driverPhone && <div className="form-error">{errors.driverPhone}</div>}
                 </div>
               </div>
+
+              {!editingTaxiId ? (
+                <div className="form-two">
+                  <div className="form-field">
+                    <label className="form-label">Driver email</label>
+                    <input
+                      type="email"
+                      className="form-input"
+                      value={driverEmail}
+                      onChange={(event) => setDriverEmail(event.target.value)}
+                      placeholder="Required"
+                    />
+                    {errors.driverEmail && <div className="form-error">{errors.driverEmail}</div>}
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Driver password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={driverPassword}
+                      onChange={(event) => setDriverPassword(event.target.value)}
+                      placeholder="Required"
+                    />
+                    {errors.driverPassword && <div className="form-error">{errors.driverPassword}</div>}
+                  </div>
+                </div>
+              ) : null}
 
               <button type="submit" className="form-primary" disabled={submitting}>
                 {submitting ? "Saving..." : editingTaxiId ? "Save changes" : "Save & generate"}

@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
 import { buildAdminSnapshotFromCollections, buildDateBuckets, formatCurrency, formatDateRangeLabel, getCurrentMonthDateRange } from "./admin/adminData.js";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { useCachedResource } from "../lib/adminCache.js";
+import { fetchAdminAnalytics } from "../lib/adminFetchers.js";
+import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 
 function buildSmoothPath(points) {
   if (points.length === 0) {
@@ -237,56 +240,29 @@ function RevenueTrendCard({ items }) {
 }
 
 function RevenuePage() {
-  const { authenticatedRequest } = useAdminAuth();
+  const { authenticatedRequest, user } = useAdminAuth();
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
-  const [loading, setLoading] = useState(false);
-  const [bookings, setBookings] = useState([]);
-  const [loadError, setLoadError] = useState("");
-  const timerRef = useRef(null);
+  const {
+    data: analyticsData,
+    error: loadError,
+    isLoading,
+    isFetching
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "dashboard:analytics",
+    fetcher: () => fetchAdminAnalytics(authenticatedRequest),
+    staleTime: 90_000,
+    persist: true,
+    persistMaxAge: 5 * 60_000,
+    emptyValue: { bookings: [], taxis: [] },
+    errorMessage: "Unable to load revenue data."
+  });
+  const bookings = analyticsData.bookings || [];
   const allSnapshot = useMemo(() => buildAdminSnapshotFromCollections({ bookings }), [bookings]);
   const snapshot = useMemo(() => buildAdminSnapshotFromCollections({ bookings, range }), [bookings, range]);
   const revenueSeries = useMemo(() => getRevenueSeries(snapshot.doneBookings, range), [snapshot.doneBookings, range]);
   const bestMonth = revenueSeries.reduce((best, item) => (item.amount > best.amount ? item : best), revenueSeries[0] || { label: "-", amount: 0 });
   const avgRevenue = revenueSeries.length ? snapshot.totals.revenue / revenueSeries.length : 0;
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadRevenueData() {
-      setLoading(true);
-      setLoadError("");
-
-      try {
-        const payload = await authenticatedRequest("/dashboard/reports/bookings", { method: "GET" });
-        if (active) {
-          setBookings(payload.data || []);
-        }
-      } catch (error) {
-        if (active) {
-          setLoadError(error?.message || "Unable to load revenue data.");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadRevenueData();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
-
-  function runFilterUpdate(nextRange) {
-    window.clearTimeout(timerRef.current);
-    setLoading(true);
-    setRange(nextRange);
-    timerRef.current = window.setTimeout(() => setLoading(false), 220);
-  }
 
   return (
     <AdminShell
@@ -294,14 +270,18 @@ function RevenuePage() {
       openBookingsCount={allSnapshot.totals.open}
       title="Revenue"
       actions={
-        <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
+        <DateRangeFilter value={range} loading={isFetching} onApply={setRange} onReset={() => setRange(getCurrentMonthDateRange())} />
       }
     >
       <section className="admin-dashboard-grid">
         <div className="admin-dashboard-main">
-          {loading ? (
+          {isFetching && !isLoading ? <InlineLoadingNotice label={`Refreshing revenue data for ${formatDateRangeLabel(range)}...`} /> : null}
+
+          {isLoading ? (
             <div className="admin-panel-card">
-              <div className="admin-loading-state">Updating revenue for {formatDateRangeLabel(range)}...</div>
+              <div className="admin-loading-state">
+                <LoadingBlock title="Loading revenue" copy="Preparing live earnings totals and trend charts." compact />
+              </div>
             </div>
           ) : (
             <>

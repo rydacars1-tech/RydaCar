@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import { formatDateTime } from "./admin/adminData.js";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { useCachedResource } from "../lib/adminCache.js";
+import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -9,69 +11,61 @@ function isValidEmail(value) {
 
 function UserManagementPage() {
   const { authenticatedRequest, user: sessionUser } = useAdminAuth();
-  const [users, setUsers] = useState([]);
   const [searchValue, setSearchValue] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [formValues, setFormValues] = useState({ name: "", email: "", password: "" });
   const [errors, setErrors] = useState({});
-  const [openBookingsCount, setOpenBookingsCount] = useState(0);
+  const {
+    data: userPageData,
+    error: loadError,
+    isLoading,
+    isFetching,
+    mutate
+  } = useCachedResource({
+    userId: sessionUser?.id,
+    cacheKey: "users:management",
+    fetcher: async () => {
+      const [driversPayload, adminsPayload, statsPayload] = await Promise.all([
+        authenticatedRequest("/users/drivers", { method: "GET" }),
+        authenticatedRequest("/auth/admin-users", { method: "GET" }),
+        authenticatedRequest("/dashboard/admin", { method: "GET" })
+      ]);
 
-  useEffect(() => {
-    let active = true;
+      const mappedDrivers = (driversPayload.data?.items || []).map((driver) => ({
+        id: driver.id,
+        role: "Driver",
+        name: driver.name,
+        phone: driver.phone || "",
+        email: driver.email,
+        status: driver.status === "active" ? "Active" : "Inactive",
+        vehicle: driver.vehicleNumber || "Unassigned",
+        lastSeen: driver.createdAt ? formatDateTime(driver.createdAt) : "Recently added"
+      }));
 
-    async function loadUsers() {
-      setFeedback("");
+      const mappedAdmins = (adminsPayload.data || []).map((adminUser) => ({
+        id: adminUser.id,
+        role: adminUser.role === "super_admin" ? "Super Admin" : "Sub Admin",
+        name: adminUser.name,
+        phone: adminUser.phone || "",
+        email: adminUser.email,
+        status: adminUser.status === "active" ? "Active" : "Inactive",
+        vehicle: "Admin access",
+        lastSeen: adminUser.createdAt ? formatDateTime(adminUser.createdAt) : "Recently added"
+      }));
 
-      try {
-        const [driversPayload, adminsPayload, statsPayload] = await Promise.all([
-          authenticatedRequest("/users/drivers", { method: "GET" }),
-          authenticatedRequest("/auth/admin-users", { method: "GET" }),
-          authenticatedRequest("/dashboard/admin", { method: "GET" })
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        const mappedDrivers = (driversPayload.data?.items || []).map((driver) => ({
-          id: driver.id,
-          role: "Driver",
-          name: driver.name,
-          phone: driver.phone || "",
-          email: driver.email,
-          status: driver.status === "active" ? "Active" : "Inactive",
-          vehicle: driver.vehicleNumber || "Unassigned",
-          lastSeen: driver.createdAt ? formatDateTime(driver.createdAt) : "Recently added"
-        }));
-
-        const mappedAdmins = (adminsPayload.data || []).map((adminUser) => ({
-          id: adminUser.id,
-          role: adminUser.role === "super_admin" ? "Super Admin" : "Sub Admin",
-          name: adminUser.name,
-          phone: adminUser.phone || "",
-          email: adminUser.email,
-          status: adminUser.status === "active" ? "Active" : "Inactive",
-          vehicle: "Admin access",
-          lastSeen: adminUser.createdAt ? formatDateTime(adminUser.createdAt) : "Recently added"
-        }));
-
-        setUsers([...mappedAdmins, ...mappedDrivers]);
-        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
-      } catch (error) {
-        if (active) {
-          setFeedback(error?.message || "Unable to load users.");
-        }
-      }
-    }
-
-    loadUsers();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
+      return {
+        users: [...mappedAdmins, ...mappedDrivers],
+        openBookingsCount: Number(statsPayload.data?.pendingBookings || 0)
+      };
+    },
+    staleTime: 60_000,
+    emptyValue: { users: [], openBookingsCount: 0 },
+    errorMessage: "Unable to load users."
+  });
+  const users = userPageData.users || [];
+  const openBookingsCount = userPageData.openBookingsCount || 0;
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -159,7 +153,10 @@ function UserManagementPage() {
         lastSeen: payload.data.createdAt ? formatDateTime(payload.data.createdAt) : "Just created"
       };
 
-      setUsers((current) => [nextUser, ...current]);
+      mutate((current) => ({
+        ...current,
+        users: [nextUser, ...current.users]
+      }));
       setFeedback("Sub admin created successfully.");
       closeModal();
     } catch (error) {
@@ -181,8 +178,17 @@ function UserManagementPage() {
           </button>
         ) : null
       }
+      mobilePrimaryAction={
+        sessionUser?.role === "super_admin" ? (
+          <button type="button" className="admin-primary-button" onClick={() => setCreateModalOpen(true)}>
+            Add Admin
+          </button>
+        ) : null
+      }
     >
       <section className="admin-panel-card">
+        {isFetching && !isLoading ? <InlineLoadingNotice label="Refreshing users and roles..." /> : null}
+
         <div className="admin-section-head">
           <div>
             <div className="admin-section-title">Users list</div>
@@ -204,10 +210,14 @@ function UserManagementPage() {
             <span>{counts.subAdmins} sub admins</span>
             <span>{counts.active} active</span>
           </div>
-          {feedback ? <div className="admin-inline-feedback admin-inline-feedback-tight">{feedback}</div> : null}
+          {feedback || loadError ? <div className="admin-inline-feedback admin-inline-feedback-tight">{feedback || loadError}</div> : null}
         </div>
 
-        {filteredUsers.length === 0 ? (
+        {isLoading ? (
+          <div className="admin-loading-state">
+            <LoadingBlock title="Loading users" copy="Fetching admin accounts, drivers, and access levels." compact />
+          </div>
+        ) : filteredUsers.length === 0 ? (
           <div className="admin-empty-state">
             <div className="admin-empty-state-title">No users found</div>
             <div className="admin-empty-state-copy">Try another search term or create a new sub admin.</div>

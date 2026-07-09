@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
 import {
@@ -10,6 +10,8 @@ import {
   navigateTo
 } from "./admin/adminData.js";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { invalidateAdminDataCache, useCachedResource } from "../lib/adminCache.js";
+import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 
 function CopyIcon() {
   return (
@@ -21,52 +23,33 @@ function CopyIcon() {
 }
 
 function OperatorPage({ initialTab = "bookings" }) {
-  const { authenticatedRequest } = useAdminAuth();
+  const { authenticatedRequest, user } = useAdminAuth();
   const [tab, setTab] = useState(initialTab);
   const [copiedPhoneKey, setCopiedPhoneKey] = useState("");
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
-  const [loading, setLoading] = useState(false);
-  const [allBookings, setAllBookings] = useState([]);
   const [actionError, setActionError] = useState("");
-  const timerRef = useRef(null);
+  const {
+    data: allBookings,
+    error: loadError,
+    isLoading,
+    isFetching,
+    refresh,
+    mutate
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "bookings:operator",
+    fetcher: async () => {
+      const payload = await authenticatedRequest("/bookings", { method: "GET" });
+      return payload.data?.items || [];
+    },
+    staleTime: 45_000,
+    emptyValue: [],
+    errorMessage: "Unable to load bookings."
+  });
 
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadBookings() {
-      setLoading(true);
-      setActionError("");
-
-      try {
-        const payload = await authenticatedRequest("/bookings", { method: "GET" });
-        if (!active) {
-          return;
-        }
-
-        setAllBookings(payload.data?.items || []);
-      } catch (error) {
-        if (active) {
-          setActionError(error?.message || "Unable to load bookings.");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadBookings();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
   const openBookings = useMemo(() => {
     return allBookings.filter((booking) => !["completed", "cancelled"].includes(String(booking.status || "").toLowerCase()));
@@ -80,18 +63,14 @@ function OperatorPage({ initialTab = "bookings" }) {
   const shown = tab === "history" ? filteredDoneBookings : filteredOpenBookings;
   const openCount = openBookings.length;
 
-  async function reloadBookings() {
-    const payload = await authenticatedRequest("/bookings", { method: "GET" });
-    setAllBookings(payload.data?.items || []);
-  }
-
   async function markDone(bookingId) {
     try {
       await authenticatedRequest(`/bookings/${bookingId}/complete`, {
         method: "PATCH",
         body: JSON.stringify({ paymentStatus: "paid" })
       });
-      await reloadBookings();
+      invalidateAdminDataCache(user?.id, "dashboard:analytics");
+      await refresh();
     } catch (error) {
       setActionError(error?.message || "Unable to complete this booking.");
     }
@@ -100,7 +79,8 @@ function OperatorPage({ initialTab = "bookings" }) {
   async function clearBookings() {
     try {
       await authenticatedRequest("/bookings", { method: "DELETE" });
-      setAllBookings([]);
+      invalidateAdminDataCache(user?.id, "dashboard:analytics");
+      mutate([]);
     } catch (error) {
       setActionError(error?.message || "Unable to clear bookings.");
     }
@@ -122,13 +102,6 @@ function OperatorPage({ initialTab = "bookings" }) {
     }
   }
 
-  function runFilterUpdate(nextRange) {
-    window.clearTimeout(timerRef.current);
-    setLoading(true);
-    setRange(nextRange);
-    timerRef.current = window.setTimeout(() => setLoading(false), 180);
-  }
-
   return (
     <AdminShell
       activeNav="bookings"
@@ -136,14 +109,24 @@ function OperatorPage({ initialTab = "bookings" }) {
       title="Bookings"
       actions={
         <>
-          <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
-          <button type="button" className="admin-ghost-button" onClick={reloadBookings}>
+          <DateRangeFilter value={range} loading={isFetching} onApply={setRange} onReset={() => setRange(getCurrentMonthDateRange())} />
+          <button type="button" className="admin-ghost-button" onClick={() => refresh()} disabled={isFetching}>
             Refresh
           </button>
           <button type="button" className="admin-primary-button" onClick={() => navigateTo("#/qr")}>
             Generate QR
           </button>
         </>
+      }
+      mobilePrimaryAction={
+        <DateRangeFilter
+          value={range}
+          loading={isFetching}
+          onApply={setRange}
+          onReset={() => setRange(getCurrentMonthDateRange())}
+          compactOnMobile
+          compactLabel="Filter"
+        />
       }
       secondaryTabs={[
         {
@@ -169,6 +152,8 @@ function OperatorPage({ initialTab = "bookings" }) {
       ]}
     >
       <section className="admin-panel-card">
+        {isFetching && !isLoading ? <InlineLoadingNotice label={`Refreshing bookings for ${formatDateRangeLabel(range)}...`} /> : null}
+
         <div className="admin-section-head">
           <div>
             <div className="admin-section-title">{tab === "history" ? "Completed booking history" : "Pending booking queue"}</div>
@@ -180,10 +165,12 @@ function OperatorPage({ initialTab = "bookings" }) {
           </div>
         </div>
 
-        {actionError ? <div className="admin-inline-feedback">{actionError}</div> : null}
+        {actionError || loadError ? <div className="admin-inline-feedback">{actionError || loadError}</div> : null}
 
-        {loading ? (
-          <div className="admin-loading-state">Updating bookings for {formatDateRangeLabel(range)}...</div>
+        {isLoading ? (
+          <div className="admin-loading-state">
+            <LoadingBlock title="Loading bookings" copy="Fetching active and completed booking records." compact />
+          </div>
         ) : shown.length === 0 ? (
           <div className="admin-empty-state">
             <div className="admin-empty-state-title">{tab === "history" ? "No completed bookings yet" : "No active bookings yet"}</div>

@@ -5,7 +5,7 @@ const API_BASE_URL = (() => {
   }
 
   if (typeof window !== "undefined" && window.location.hostname === "localhost") {
-    return "http://localhost:8080/api/v1";
+    return "/api/v1";
   }
 
   if (typeof window !== "undefined") {

@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import DateRangeFilter from "./admin/DateRangeFilter.jsx";
 import { buildAdminSnapshotFromCollections, formatDateRangeLabel, getCurrentMonthDateRange, navigateTo } from "./admin/adminData.js";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { useCachedResource } from "../lib/adminCache.js";
+import { fetchAdminAnalytics } from "../lib/adminFetchers.js";
+import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 
 function MetricCard({ label, value, hint, icon, tone = "default", onClick }) {
   return (
@@ -219,57 +222,23 @@ function TrendAnalyticsCard({ items }) {
 }
 
 function DashboardPage() {
-  const { authenticatedRequest } = useAdminAuth();
+  const { authenticatedRequest, user } = useAdminAuth();
   const [range, setRange] = useState(() => getCurrentMonthDateRange());
-  const [loading, setLoading] = useState(false);
-  const [apiData, setApiData] = useState({ bookings: [], taxis: [] });
-  const [loadError, setLoadError] = useState("");
-  const timerRef = useRef(null);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadDashboardData() {
-      setLoading(true);
-      setLoadError("");
-
-      try {
-        const [bookingsPayload, qrPayload] = await Promise.all([
-          authenticatedRequest("/dashboard/reports/bookings", { method: "GET" }),
-          authenticatedRequest("/qr", { method: "GET" })
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        setApiData({
-          bookings: bookingsPayload.data || [],
-          taxis: (qrPayload.data || []).map((item) => ({
-            id: item.id,
-            createdAt: item.createdAt,
-            status: item.status
-          }))
-        });
-      } catch (error) {
-        if (active) {
-          setLoadError(error?.message || "Unable to load dashboard data.");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadDashboardData();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+  const {
+    data: apiData,
+    error: loadError,
+    isLoading,
+    isFetching
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "dashboard:analytics",
+    fetcher: () => fetchAdminAnalytics(authenticatedRequest),
+    staleTime: 90_000,
+    persist: true,
+    persistMaxAge: 5 * 60_000,
+    emptyValue: { bookings: [], taxis: [] },
+    errorMessage: "Unable to load dashboard data."
+  });
 
   const allSnapshot = useMemo(() => buildAdminSnapshotFromCollections(apiData), [apiData]);
   const snapshot = useMemo(() => buildAdminSnapshotFromCollections({ ...apiData, range }), [apiData, range]);
@@ -337,27 +306,34 @@ function DashboardPage() {
     }
   ];
 
-  function runFilterUpdate(nextRange) {
-    window.clearTimeout(timerRef.current);
-    setLoading(true);
-    setRange(nextRange);
-    timerRef.current = window.setTimeout(() => setLoading(false), 220);
-  }
-
   return (
     <AdminShell
       activeNav="dashboard"
       openBookingsCount={allSnapshot.totals.open}
       title="Dashboard"
       actions={
-        <DateRangeFilter value={range} loading={loading} onApply={runFilterUpdate} onReset={() => runFilterUpdate(getCurrentMonthDateRange())} />
+        <DateRangeFilter value={range} loading={isFetching} onApply={setRange} onReset={() => setRange(getCurrentMonthDateRange())} />
+      }
+      mobilePrimaryAction={
+        <DateRangeFilter
+          value={range}
+          loading={isFetching}
+          onApply={setRange}
+          onReset={() => setRange(getCurrentMonthDateRange())}
+          compactOnMobile
+          compactLabel="Filter"
+        />
       }
     >
       <section className="admin-dashboard-grid">
         <div className="admin-dashboard-main">
-          {loading ? (
+          {isFetching && !isLoading ? <InlineLoadingNotice label={`Refreshing dashboard data for ${formatDateRangeLabel(range)}...`} /> : null}
+
+          {isLoading ? (
             <div className="admin-panel-card">
-              <div className="admin-loading-state">Updating dashboard data for {formatDateRangeLabel(range)}...</div>
+              <div className="admin-loading-state">
+                <LoadingBlock title="Loading dashboard" copy="Fetching live bookings, QR activity, and performance metrics." compact />
+              </div>
             </div>
           ) : (
             <>

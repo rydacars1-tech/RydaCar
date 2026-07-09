@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatDateRangeLabel } from "./adminData.js";
+import { Spinner } from "../common/LoadingState.jsx";
 
 function CalendarIcon() {
   return (
@@ -12,7 +13,7 @@ function CalendarIcon() {
   );
 }
 
-function DateRangeFilter({ value, onApply, onReset, loading = false }) {
+function DateRangeFilter({ value, onApply, onReset, loading = false, compactOnMobile = false, compactLabel = "Filter" }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const rootRef = useRef(null);
@@ -53,7 +54,7 @@ function DateRangeFilter({ value, onApply, onReset, loading = false }) {
   }
 
   return (
-    <div className="admin-date-filter" ref={rootRef}>
+    <div className={compactOnMobile ? "admin-date-filter admin-date-filter-compact-mobile" : "admin-date-filter"} ref={rootRef}>
       <button
         type="button"
         className={open ? "admin-filter-button admin-filter-button-open" : "admin-filter-button"}
@@ -67,6 +68,7 @@ function DateRangeFilter({ value, onApply, onReset, loading = false }) {
           <span className="admin-filter-button-label">Date filter</span>
           <strong>{formatDateRangeLabel(value)}</strong>
         </span>
+        {compactOnMobile ? <span className="admin-filter-button-mobile-text">{compactLabel}</span> : null}
       </button>
 
       {open ? (
@@ -100,7 +102,14 @@ function DateRangeFilter({ value, onApply, onReset, loading = false }) {
               Reset
             </button>
             <button type="button" className="admin-filter-apply" onClick={handleApply} disabled={invalid || loading}>
-              {loading ? "Updating..." : "Apply"}
+              {loading ? (
+                <span className="auth-submit-inner">
+                  <Spinner size="xs" label="Updating date filter" />
+                  <span>Apply</span>
+                </span>
+              ) : (
+                "Apply"
+              )}
             </button>
           </div>
         </div>

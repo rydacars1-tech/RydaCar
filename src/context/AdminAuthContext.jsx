@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { requestJson } from "../lib/api.js";
+import { clearAdminDataCache } from "../lib/adminCache.js";
 
 const SESSION_STORAGE_KEY = "ryda.admin.session.v1";
 
@@ -27,8 +28,9 @@ export function AdminAuthProvider({ children }) {
   }, [session]);
 
   const clearSession = useCallback(() => {
+    clearAdminDataCache(session?.user?.id);
     setSession(null);
-  }, []);
+  }, [session?.user?.id]);
 
   const refreshAccessToken = useCallback(async () => {
     if (!session?.refreshToken) {
@@ -104,6 +106,32 @@ export function AdminAuthProvider({ children }) {
     return payload.data;
   }, []);
 
+  const requestPasswordReset = useCallback(async (email, resetBaseUrl) => {
+    return requestJson("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: String(email || "").trim().toLowerCase(),
+        resetBaseUrl: resetBaseUrl || ""
+      })
+    });
+  }, []);
+
+  const validateResetToken = useCallback(async (token) => {
+    return requestJson(`/auth/reset-password/validate?token=${encodeURIComponent(String(token || "").trim())}`, {
+      method: "GET"
+    });
+  }, []);
+
+  const resetPassword = useCallback(async (token, newPassword) => {
+    return requestJson("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({
+        token: String(token || "").trim(),
+        newPassword: String(newPassword || "")
+      })
+    });
+  }, []);
+
   const logout = useCallback(async () => {
     if (session?.accessToken) {
       try {
@@ -160,13 +188,19 @@ export function AdminAuthProvider({ children }) {
       authReady,
       session,
       user: session?.user || null,
+      role: session?.user?.role || "",
+      isAdmin: ["super_admin", "sub_admin"].includes(session?.user?.role || ""),
+      isDriver: (session?.user?.role || "") === "driver",
       isAuthenticated: Boolean(session?.accessToken),
       login,
+      requestPasswordReset,
+      validateResetToken,
+      resetPassword,
       logout,
       clearSession,
       authenticatedRequest
     }),
-    [authReady, authenticatedRequest, clearSession, login, logout, session]
+    [authReady, authenticatedRequest, clearSession, login, logout, requestPasswordReset, resetPassword, session, validateResetToken]
   );
 
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>;

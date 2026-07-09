@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import AdminShell from "./admin/AdminShell.jsx";
 import { useAdminAuth } from "../context/AdminAuthContext.jsx";
+import { useCachedResource } from "../lib/adminCache.js";
+import { InlineLoadingNotice, LoadingBlock, Spinner } from "./common/LoadingState.jsx";
 
 const DEFAULT_SETTINGS = {
   pricing: {
@@ -28,74 +30,68 @@ const DEFAULT_SETTINGS = {
 
 function SettingsPage() {
   const { authenticatedRequest, user } = useAdminAuth();
+  const {
+    data: settingsPageData,
+    error: loadError,
+    isLoading,
+    isFetching,
+    mutate
+  } = useCachedResource({
+    userId: user?.id,
+    cacheKey: "settings:page",
+    fetcher: async () => {
+      const [settingsPayload, statsPayload] = await Promise.all([
+        authenticatedRequest("/settings", { method: "GET" }),
+        authenticatedRequest("/dashboard/admin", { method: "GET" })
+      ]);
+
+      const merged = {
+        pricing: {
+          ...DEFAULT_SETTINGS.pricing,
+          ...(settingsPayload.data?.pricing || {})
+        },
+        notifications: {
+          ...DEFAULT_SETTINGS.notifications,
+          ...(settingsPayload.data?.notifications || {})
+        },
+        stripe: {
+          ...DEFAULT_SETTINGS.stripe,
+          ...(settingsPayload.data?.stripe || {})
+        },
+        email: {
+          ...DEFAULT_SETTINGS.email,
+          ...(settingsPayload.data?.email || {})
+        },
+        maps: {
+          ...DEFAULT_SETTINGS.maps,
+          ...(settingsPayload.data?.maps || {})
+        }
+      };
+
+      return {
+        settings: merged,
+        openBookingsCount: Number(statsPayload.data?.pendingBookings || 0)
+      };
+    },
+    staleTime: 2 * 60_000,
+    emptyValue: { settings: DEFAULT_SETTINGS, openBookingsCount: 0 },
+    errorMessage: "Unable to load settings."
+  });
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [draft, setDraft] = useState(DEFAULT_SETTINGS);
-  const [openBookingsCount, setOpenBookingsCount] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
   const canSave = user?.role === "super_admin";
+  const openBookingsCount = settingsPageData.openBookingsCount || 0;
 
   useEffect(() => {
-    let active = true;
-
-    async function loadSettings() {
-      setLoading(true);
-      setFeedback("");
-
-      try {
-        const [settingsPayload, statsPayload] = await Promise.all([
-          authenticatedRequest("/settings", { method: "GET" }),
-          authenticatedRequest("/dashboard/admin", { method: "GET" })
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        const merged = {
-          pricing: {
-            ...DEFAULT_SETTINGS.pricing,
-            ...(settingsPayload.data?.pricing || {})
-          },
-          notifications: {
-            ...DEFAULT_SETTINGS.notifications,
-            ...(settingsPayload.data?.notifications || {})
-          },
-          stripe: {
-            ...DEFAULT_SETTINGS.stripe,
-            ...(settingsPayload.data?.stripe || {})
-          },
-          email: {
-            ...DEFAULT_SETTINGS.email,
-            ...(settingsPayload.data?.email || {})
-          },
-          maps: {
-            ...DEFAULT_SETTINGS.maps,
-            ...(settingsPayload.data?.maps || {})
-          }
-        };
-
-        setSettings(merged);
-        setDraft(merged);
-        setOpenBookingsCount(Number(statsPayload.data?.pendingBookings || 0));
-      } catch (error) {
-        if (active) {
-          setFeedback(error?.message || "Unable to load settings.");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
+    if (!settingsPageData?.settings) {
+      return;
     }
 
-    loadSettings();
-
-    return () => {
-      active = false;
-    };
-  }, [authenticatedRequest]);
+    setSettings(settingsPageData.settings);
+    setDraft(settingsPageData.settings);
+  }, [settingsPageData]);
 
   function updateSection(section, key, value) {
     setDraft((current) => ({
@@ -151,6 +147,10 @@ function SettingsPage() {
 
       setSettings(merged);
       setDraft(merged);
+      mutate((current) => ({
+        ...current,
+        settings: merged
+      }));
       setFeedback("Settings saved successfully.");
     } catch (error) {
       setFeedback(error?.message || "Unable to save settings.");
@@ -166,16 +166,31 @@ function SettingsPage() {
       title="Settings"
       actions={
         <>
-          <button type="button" className="admin-ghost-button" onClick={resetChanges} disabled={loading || saving}>
+          <button type="button" className="admin-ghost-button" onClick={resetChanges} disabled={isLoading || saving}>
             Reset changes
           </button>
-          <button type="button" className="admin-primary-button" onClick={saveSettings} disabled={!canSave || loading || saving}>
-            {saving ? "Saving..." : "Save settings"}
+          <button type="button" className="admin-primary-button" onClick={saveSettings} disabled={!canSave || isLoading || saving}>
+            {saving ? (
+              <span className="auth-submit-inner">
+                <Spinner size="sm" tone="light" label="Saving settings" />
+                <span>Saving...</span>
+              </span>
+            ) : (
+              "Save settings"
+            )}
           </button>
         </>
       }
     >
-      {feedback ? <div className="admin-inline-feedback">{feedback}</div> : null}
+      {isFetching && !isLoading ? <InlineLoadingNotice label="Refreshing settings..." /> : null}
+      {feedback || loadError ? <div className="admin-inline-feedback">{feedback || loadError}</div> : null}
+      {isLoading ? (
+        <section className="admin-panel-card">
+          <div className="admin-loading-state">
+            <LoadingBlock title="Loading settings" copy="Fetching system controls, pricing, and notification preferences." compact />
+          </div>
+        </section>
+      ) : (
       <section className="admin-two-column-layout">
         <div className="admin-stack-layout">
           <div className="admin-panel-card">
@@ -342,6 +357,7 @@ function SettingsPage() {
           </div>
         </div>
       </section>
+      )}
     </AdminShell>
   );
 }
