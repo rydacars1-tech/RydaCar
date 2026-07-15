@@ -13,6 +13,7 @@ import ResetPasswordPage from "./components/ResetPasswordPage.jsx";
 import DriverDashboardPage from "./components/DriverDashboardPage.jsx";
 import DriverBookingsPage from "./components/DriverBookingsPage.jsx";
 import DriverNotificationsPage from "./components/DriverNotificationsPage.jsx";
+import DriverTipAmountPage from "./components/DriverTipAmountPage.jsx";
 import DriverProfilePage from "./components/DriverProfilePage.jsx";
 import { useAdminAuth } from "./context/AdminAuthContext.jsx";
 import { LoadingBlock } from "./components/common/LoadingState.jsx";
@@ -143,6 +144,13 @@ function App() {
       return redirect("#/dashboard");
     }
     return <DriverNotificationsPage />;
+  }
+
+  if (route.path === "/driver/tips") {
+    if (!isDriver) {
+      return redirect("#/dashboard");
+    }
+    return <DriverTipAmountPage />;
   }
 
   if (route.path === "/driver/profile") {

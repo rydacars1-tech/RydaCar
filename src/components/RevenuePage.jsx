@@ -290,9 +290,10 @@ function RevenuePage() {
                 <div className="admin-metric-card admin-metric-card-dark">
                   <div className="admin-metric-top">
                     <div className="admin-metric-icon">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 1v22" />
-                        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6" />
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <text x="12" y="16" textAnchor="middle" fontSize="16" fontWeight="700" fill="currentColor">
+                          £
+                        </text>
                       </svg>
                     </div>
                     <div className="admin-metric-label">Platform revenue</div>

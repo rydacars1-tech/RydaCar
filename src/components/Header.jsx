@@ -45,26 +45,6 @@ function Header() {
             Contact us
           </button>
         </nav>
-        <div className="header-tools">
-          <button
-            type="button"
-            className="header-link header-link-tool"
-            onClick={() => {
-              window.location.hash = "#/qr";
-            }}
-          >
-            Generate QR
-          </button>
-          <button
-            type="button"
-            className="header-link header-link-tool"
-            onClick={() => {
-              window.location.hash = "#/operator";
-            }}
-          >
-            Operator
-          </button>
-        </div>
       </div>
     </header>
   );

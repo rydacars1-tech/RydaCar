@@ -43,6 +43,16 @@ function DriverIcon({ icon }) {
     );
   }
 
+  if (icon === "tips") {
+    return (
+      <svg {...sharedProps} fill="none" aria-hidden="true">
+        <text x="12" y="16" textAnchor="middle" fontSize="16" fontWeight="700" fill="currentColor" stroke="none">
+          £
+        </text>
+      </svg>
+    );
+  }
+
   if (icon === "profile") {
     return (
       <svg {...sharedProps}>
@@ -113,6 +123,7 @@ export default function DriverShell({ activeNav = "dashboard", title = "", actio
       { id: "dashboard", label: "Dashboard", hash: "#/driver/dashboard" },
       { id: "bookings", label: "Bookings", hash: "#/driver/bookings" },
       { id: "notifications", label: "Notifications", hash: "#/driver/notifications", badge: unreadBadge },
+      { id: "tips", label: "Tip Amount", hash: "#/driver/tips" },
       { id: "profile", label: "Profile", hash: "#/driver/profile" }
     ],
     [unreadBadge]

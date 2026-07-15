@@ -5,6 +5,20 @@ import { InlineLoadingNotice, LoadingBlock } from "./common/LoadingState.jsx";
 import { DriverDetailIcon } from "./driver/DriverIcons.jsx";
 import { getInitials } from "./driver/driverData.js";
 
+function formatProfileText(value, fallback = "Not available") {
+  const normalized = String(value || "").trim();
+  return normalized || fallback;
+}
+
+function formatStatusLabel(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "Unknown";
+  }
+
+  return normalized.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export default function DriverProfilePage() {
   const { authenticatedRequest, user } = useAdminAuth();
 
@@ -39,17 +53,19 @@ export default function DriverProfilePage() {
   });
 
   const assignedTaxis = dashboardData.assignedTaxis || [];
+  const profileName = formatProfileText(profile.name || user?.name, "Driver");
+  const accountStatus = formatStatusLabel(profile.status || user?.status);
   const summaryItems = [
-    { label: "Email", value: profile.email || "-", icon: "email" },
-    { label: "Phone", value: profile.phone || "-", icon: "phone" },
-    { label: "Role", value: user?.role === "driver" ? "Driver" : "-", icon: "role" },
-    { label: "Account status", value: profile.status || user?.status || "-", icon: "status" }
+    { label: "Email", value: formatProfileText(profile.email), icon: "email" },
+    { label: "Phone", value: formatProfileText(profile.phone), icon: "phone" },
+    { label: "Role", value: user?.role === "driver" ? "Driver" : "User", icon: "role" },
+    { label: "Account status", value: accountStatus, icon: "status" }
   ];
   const vehicleItems = [
-    { label: "Vehicle number", value: profile.vehicleNumber || "-", icon: "vehicle" },
-    { label: "Vehicle type", value: profile.vehicleType || "-", icon: "vehicle" },
-    { label: "City", value: profile.city || "-", icon: "city" },
-    { label: "License number", value: profile.licenseNumber || "-", icon: "license" }
+    { label: "Vehicle number", value: formatProfileText(profile.vehicleNumber), icon: "vehicle" },
+    { label: "Vehicle type", value: formatProfileText(profile.vehicleType), icon: "vehicle" },
+    { label: "City", value: formatProfileText(profile.city), icon: "city" },
+    { label: "License number", value: formatProfileText(profile.licenseNumber), icon: "license" }
   ];
 
   return (
@@ -66,15 +82,15 @@ export default function DriverProfilePage() {
           ) : (
             <div className="driver-profile-layout">
               <section className="driver-profile-hero">
-                <div className="driver-profile-avatar">{getInitials(profile.name || user?.name)}</div>
+                <div className="driver-profile-avatar">{getInitials(profileName)}</div>
                 <div className="driver-profile-hero-copy">
                   <div className="driver-profile-label">Authenticated driver profile</div>
-                  <h2 className="driver-profile-name">{profile.name || user?.name || "Driver"}</h2>
-                  <div className="driver-profile-subtitle">This profile is derived from your authenticated session and driver record only.</div>
+                  <h2 className="driver-profile-name">{profileName}</h2>
+                  <div className="driver-profile-subtitle">Profile details are loaded from your authenticated driver record and active account session.</div>
                   <div className="driver-profile-badges">
                     <span className="admin-status-badge admin-status-badge-done">Driver</span>
                     <span className={`admin-status-badge ${String(profile.status || user?.status || "").toLowerCase() === "active" ? "admin-status-badge-done" : ""}`}>
-                      {profile.status || user?.status || "Unknown"}
+                      {accountStatus}
                     </span>
                   </div>
                 </div>
@@ -95,7 +111,7 @@ export default function DriverProfilePage() {
                         <span className="driver-profile-info-icon">
                           <DriverDetailIcon kind={item.icon} />
                         </span>
-                        <div>
+                        <div className="driver-profile-info-content">
                           <span>{item.label}</span>
                           <strong>{item.value}</strong>
                         </div>
@@ -118,7 +134,7 @@ export default function DriverProfilePage() {
                         <span className="driver-profile-info-icon">
                           <DriverDetailIcon kind={item.icon} />
                         </span>
-                        <div>
+                        <div className="driver-profile-info-content">
                           <span>{item.label}</span>
                           <strong>{item.value}</strong>
                         </div>

@@ -220,30 +220,9 @@ function BookingPage({ taxiId, token }) {
       <main className="page-content">
         <div className="page-card">
           <h1 className="page-title">Book your taxi</h1>
+          <p className="page-subtitle">Please complete your trip details below and we will process your booking.</p>
 
           {pageError || errors.taxi ? <div className="page-alert">{pageError || errors.taxi}</div> : null}
-
-          <div className="form-two">
-            <div className="form-field">
-              <label className="form-label">Taxi</label>
-              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.vehicleNumber || ""} disabled />
-            </div>
-            <div className="form-field">
-              <label className="form-label">Taxi name</label>
-              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.taxiName || taxi?.label || ""} disabled />
-            </div>
-          </div>
-
-          <div className="form-two">
-            <div className="form-field">
-              <label className="form-label">Driver name</label>
-              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.driverName || "Not assigned"} disabled />
-            </div>
-            <div className="form-field">
-              <label className="form-label">Driver phone</label>
-              <input className="form-input" value={loadingTaxi ? "Loading..." : taxi?.driverPhone || "Not assigned"} disabled />
-            </div>
-          </div>
 
           <form className="form" onSubmit={submitBooking}>
             <div className="form-two">
@@ -360,7 +339,7 @@ function BookingPage({ taxiId, token }) {
                   setDepositIntent(true);
                 }}
               >
-                Pay deposit
+                Pay amount
               </button>
               <button type="button" className="form-secondary" onClick={() => setModalOpen(false)}>
                 Close
