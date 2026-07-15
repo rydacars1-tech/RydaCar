@@ -988,6 +988,15 @@ a {
 
 .page-topbar-book {
   grid-template-columns: 1fr auto;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.96), rgba(59, 130, 246, 0.92));
+  border: 1px solid rgba(147, 197, 253, 0.28);
+  box-shadow: 0 18px 38px rgba(30, 64, 175, 0.28);
+}
+
+.page-topbar-book .page-chip {
+  color: #eff6ff;
+  background: rgba(15, 23, 42, 0.2);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .page-back {
